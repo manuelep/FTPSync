@@ -4,7 +4,6 @@ import os
 from scheduler import Scheduler
 from archiver import Digger
 import datetime
-import ipdb
 
 upload_rel_path = 'uploads/archive'
 archive_upload_path = os.path.join(request.folder, upload_rel_path)
