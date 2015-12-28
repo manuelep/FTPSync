@@ -61,4 +61,4 @@ def fetchall(source="ftp_1"):
         "len": len(archives),
     }
 
-scheduler = Scheduler(db, migrate=appconf.db.migrate)
+scheduler = Scheduler(db, tasks=dict(fetchall=fetchall), migrate=appconf.db.migrate)
