@@ -40,7 +40,7 @@ class Digger(object):
         stream = BytesIO()
         start = datetime.datetime.now()
         self.ftp.retrbinary('RETR ' + filename, stream.write, 1024)
-        current.logger.debug("File download started: %s" % prettydate(start))
+        current.logger.debug("File '%s' download started: %s" % (filename, prettydate(start),))
         stream.seek(0)
         if self.checksum_required:
             filehash = hashlib.new('sha224')
@@ -60,6 +60,7 @@ class Digger(object):
         now = datetime.datetime.now()
         for filepath in self.ftp.nlst(path):
             path, filename = os.path.split(filepath)
+            current.logger.info("File: %s" % filename)
 
             if (name_starts is None or filename.startswith(name_starts)) and (extension is None or filename.endswith(extension)):
                 is_in_db = self.db(self.table.filename==filename).count()
@@ -91,3 +92,6 @@ class Digger(object):
                             self.db.commit()
                         else:
                             current.logger.info("It's time to update file but no new version found")
+                    else:
+                        current.logger.info("File still updated.")
+            current.logger.info("=== Fetching file operation terminated ===")

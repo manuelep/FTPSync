@@ -24,15 +24,14 @@ db.define_table("archive",
 )
 
 db.archive.modified_on.readable = True
-
 db.archive._enable_record_versioning()
 
-def fetchall(source="ftp_1"):
+def fetchall(db, source="ftp_1"):
 
-    lastedit = db.archive.modified_on.max()
+    last_update = db.archive.last_update.max()
     res = db(db.archive.id>0).select(
         db.archive.archname,
-        lastedit,
+        last_update,
         groupby = db.archive.archname,
     )
 
@@ -42,8 +41,8 @@ def fetchall(source="ftp_1"):
             # se nessun download presente
             return True
         else:
-            # se ultimo upload è troppo vecchio
-            delta = (datetime.datetime.now()-fres[lastedit])
+            # se ultima modifica è troppo vecchia
+            delta = (datetime.datetime.now()-fres[last_update])
             return delta.total_seconds()>=appconf[archname]["period"]
 
     # downloadable archives
@@ -61,4 +60,4 @@ def fetchall(source="ftp_1"):
         "len": len(archives),
     }
 
-scheduler = Scheduler(db, tasks=dict(fetchall=fetchall), migrate=appconf.db.migrate)
+#scheduler = Scheduler(db, tasks=dict(fetchall=fetchall), migrate=appconf.db.migrate)
