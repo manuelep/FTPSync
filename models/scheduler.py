@@ -2,7 +2,7 @@
 
 from scheduler import Scheduler
 from archiver import Digger
-import datetime
+import datetime, time
 import shutil
 
 upload_rel_path = 'uploads/archive'
@@ -34,7 +34,10 @@ if current.development:
     except:
         pass
 
-def fetchall(source="ftp_1"):
+def fetchall(source="ftp_1", waits=0):
+
+    if waits>0:
+        time.sleep(waits)
 
     last_update = db.archive.last_update.max()
     res = db(db.archive.id>0).select(
@@ -59,7 +62,7 @@ def fetchall(source="ftp_1"):
     ])
 
     if len(archives)>0:
-        with Digger(table=db.archive, **appconf.ftp_1) as oo:
+        with Digger(table=db.archive, **appconf[source]) as oo:
             for k,nfo in archives.iteritems():
                 if nfo["source"] == source:
                     oo.fetch(k, **nfo)
