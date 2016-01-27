@@ -1,12 +1,170 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 from gluon import *
+from gluon import current
+from gluon.storage import List
 from ftplib import FTP
 from io import BytesIO
 from app.utils import prettydate
 import datetime
 import hashlib
 import os
+import shutil
+import zipfile
+import xlrd, csv
+
+class Elaborate(object):
+
+    @staticmethod
+    def get_dest_parts(archname):
+        return (
+            current.appconf[archname].get("dest_path") or current.appconf.get("misc", {}).get("dest_path"),
+            current.appconf[archname].get("dest_name"),
+        )
+
+    @classmethod
+    def copy(cls, tab, row):
+        """ Copy file to their destination """
+        assert row.archname in ("arch_2", "arch_3", "arch_4", "arch_5",), "Wrong archive!"
+        dest_path, dest_name = cls.get_dest_parts(row.archname)
+        if not dest_path is None:
+            (filename, stream) = tab.archive.retrieve(row.archive)
+            if dest_name is None:
+                dest_name = filename
+
+            dest_file_path = os.path.join(dest_path, dest_name)
+            shutil.copyfileobj(stream, open(dest_file_path, 'wb'))
+            current.logger.debug("File %s successfully copied to: %s" % (dest_name, dest_path,))
+            return dest_file_path
+
+    @staticmethod
+    def _get_refills(): 
+        cpath = os.path.join(current.appconf.conf_price.path, "%(filename)s.%(extension)s" % current.appconf.conf_price)
+        def _iter():
+            with open(cpath, 'rb') as csvfile:
+                spamreader = csv.reader(csvfile, delimiter=',')
+                for row in spamreader:
+                    _row = List(*row)
+                    yield _row(0), _row(1)
+
+        if os.path.isfile(cpath):
+            refills = dict([(k,v) for k,v in _iter()])
+        else:
+            refills = {}
+        return refills
+                    
+ 
+    @classmethod
+    def _apply_refills(cls, filepath):
+        default_refill = 15
+        refills = cls._get_refills()
+        _get_refill = lambda cat: float(refills.get(cat, 0)) or default_refill
+
+        def _get_full_price(row):
+            refill = _get_refill(row["Categoria"])
+
+            raw_base_price = row["Prezzo Base Rivenditore"].strip()
+
+            if not raw_base_price:
+                return None
+            else:
+                base_price = float(raw_base_price.replace(",", "."))
+                full_price = (1+refill/100.)*base_price
+                rounded_price = "%.2f" % full_price
+                return rounded_price.replace(".", ",")
+
+        with xlrd.open_workbook(filepath) as ADVxls, open(filepath.replace(".xls", ".csv"), "w") as ADVcsv:
+            ADVsheet = ADVxls.sheet_by_index(0)
+            new_col_head = "Prezzo Newirbel"
+            fieldnames = [c.value.encode("utf8") for c in ADVsheet.row(0)] + [new_col_head]
+            csvwriter = csv.DictWriter(ADVcsv, fieldnames=fieldnames)
+            csvwriter.writeheader()
+            for rindex in xrange(1, ADVsheet.nrows):
+                xls_row = ADVsheet.row(rindex)
+                csv_row_content = dict(zip(fieldnames, (c.value.encode("utf8") for c in xls_row)))
+                full_price = _get_full_price(csv_row_content)
+                if not full_price is None:
+                    csv_row_content[new_col_head] = full_price
+                csvwriter.writerow(csv_row_content)
+
+    @classmethod
+    def ADVFileProcess(cls, tab, row):
+        """
+        Unzip ADVFile archive content to their destination and convert xls
+        format to csv applying refill to base price.
+        """
+        assert row.archname=="arch_1", "Wrong archive!"
+        dest_path, dest_name = cls.get_dest_parts(row.archname)
+        if not dest_path is None:
+            (filename, stream) = tab.archive.retrieve(row.archive)
+            with zipfile.ZipFile(stream, "r") as adv:
+                advfilename = adv.namelist()[0]
+                adv.extractall(dest_path)
+            if not dest_name is None:
+                dest_file_path = os.path.join(dest_path, dest_name)
+                os.rename(os.path.join(dest_path, advfilename), dest_file_path)
+            else:
+                dest_file_path = os.path.join(dest_path, advfilename)
+            cls._apply_refills(dest_file_path)
+
+    @classmethod
+    def extract_tabs(cls, tab, row):
+
+        def _get_value(cell):
+            value = cell.value
+            if isinstance(value, basestring):
+                return value.encode("utf8")
+            else:
+                return value
+
+        filepath = cls.copy(tab, row)
+        if not filepath is None:
+            with xlrd.open_workbook(filepath) as xlsSRC:
+                for sindex in xrange(xlsSRC.nsheets):
+                    sheet = xlsSRC.sheet_by_index(sindex)
+                    with open(filepath.replace(".xls", "_tab%s.csv" % sindex), "w") as csvDEST:
+                        fieldnames = [c.value.encode("utf8") for c in sheet.row(0)]
+                        csvwriter = csv.DictWriter(csvDEST, fieldnames=fieldnames)
+                        csvwriter.writeheader()
+                        for rindex in xrange(1, sheet.nrows):
+                            xls_row = sheet.row(rindex)
+                            csv_row_content = dict(zip(fieldnames, (_get_value(c) for c in xls_row)))
+                            csvwriter.writerow(csv_row_content)
+
+    @classmethod
+    def run(cls, tab, row):
+        # Prezzi
+        if row.archname == "arch_1":
+            cls.ADVFileProcess(tab, row)
+        # Catalogo
+        elif row.archname == "arch_3":
+            cls.extract_tabs(tab, row)
+        else:
+            cls.copy(tab, row)
+
+
+# def elaborate(table, row):
+#     default_refill = 15/100.
+#     if row.archname == "":
+#         # Creazione nuovo csv con nuovi prezzi
+#         pass
+# 
+#     # Al momento _ogni_ tipo di file va spostato in una sua destinazione per l'importazione
+#     if "dest_path" in current.appconf[row.archname] and current.appconf[row.archname].dest_path:
+# 
+#         dest_path = current.appconf[row.archname].dest_path
+# 
+#         (filename, stream) = table.archive.retrieve(row.archive)
+# 
+#         if "dest_name" in current.appconf[row.archname] and current.appconf[row.archname].dest_name:
+#             dest_name = current.appconf[row.archname].dest_name
+#         else:
+#             dest_name = filename
+# 
+#         # sposta il file in destinazione
+#         shutil.copyfileobj(stream, open(os.path.join(dest_path, dest_name), 'wb'))
+#         current.logger.debug("File %s successfully copied to: %s" % (dest_name, dest_path,))
+    
 
 class Digger(object):
     """"""
@@ -56,9 +214,9 @@ class Digger(object):
         stream.close()
         return newfilename, checksum
 
-    def fetch(self, archname, path, period, name_starts=None, extension=None, **kw):
+    def fetch(self, archname, remote_path, period, name_starts=None, extension=None, **kw):
         now = datetime.datetime.now()
-        for filepath in self.ftp.nlst(path):
+        for filepath in self.ftp.nlst(remote_path):
             path, filename = os.path.split(filepath)
             current.logger.info("File: %s" % filename)
 
@@ -69,14 +227,16 @@ class Digger(object):
                 if is_in_db==0:
                     current.logger.debug("New file detected and downloaded.")
                     newfilename, filehash = self.retrieve(filepath)
-                    self.table.insert(
+                    id = self.table.insert(
                         filename = filename,
                         archname = archname,
                         archive = newfilename,
                         last_update = last_fs_update,
                         checksum = filehash
                     )
+                    row = self.table[id]
                     self.db.commit()
+                    Elaborate.run(self.table, row)
                 else:
                     row = self.db(self.db.archive.filename==filename).select(limitby=(0,1)).first()
                     if (now-row.last_update).total_seconds()>=period:
@@ -90,6 +250,7 @@ class Digger(object):
     #                             is_active = True
                             )
                             self.db.commit()
+                            Elaborate.run(self.table, row)
                         else:
                             current.logger.info("It's time to update file but no new version found")
                     else:

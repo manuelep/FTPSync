@@ -8,10 +8,10 @@ class Fetcher(object):
             yield k
 
     @classmethod
-    def run(cls, db):
+    def run(cls):
         for k in cls._iter():
-            fetchall(db, k)
+            fetchall(k)
 
 
 if __name__ == "__main__":
-    Fetcher.run(db)
+    Fetcher.run()

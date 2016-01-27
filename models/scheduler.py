@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
 
-import os
 from scheduler import Scheduler
 from archiver import Digger
 import datetime
+import shutil
 
 upload_rel_path = 'uploads/archive'
 archive_upload_path = os.path.join(request.folder, upload_rel_path)
@@ -26,7 +26,15 @@ db.define_table("archive",
 db.archive.modified_on.readable = True
 db.archive._enable_record_versioning()
 
-def fetchall(db, source="ftp_1"):
+if current.development:
+    db.archive.truncate("CASCADE")
+    try:
+        shutil.rmtree(archive_upload_path)
+#         shutil.rmtree(os.path.join(request.folder, 'uploads/test'))
+    except:
+        pass
+
+def fetchall(source="ftp_1"):
 
     last_update = db.archive.last_update.max()
     res = db(db.archive.id>0).select(
