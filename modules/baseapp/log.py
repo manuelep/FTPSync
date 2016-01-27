@@ -1,19 +1,9 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
-########################
-# Global imports
-########################
-
 import os, logging, logging.handlers
 
-
-########################
-# Framework imports
-########################
-
 from gluon import *
-
 
 def get_configured_logger(name):
     """ Courtesy of: http://www.web2pyslices.com/slice/show/1416/logging
@@ -32,7 +22,7 @@ def get_configured_logger(name):
             backupCount = 2
         )
         handler.setFormatter(logging.Formatter(formatter))
-        logging_level = logging.DEBUG if current.development else logging.WARNING
+        logging_level = logging.DEBUG if current.development else logging.INFO
         handler.setLevel(logging_level)
         logger.addHandler(handler)
         logger.setLevel(logging_level)

@@ -18,10 +18,10 @@ db = DAL(appconf.db.uri, pool_size=appconf.db.pool_size, check_reserved=['all'],
 
 ## by default give a view/generic.extension to all actions from localhost
 ## none otherwise. a pattern can be 'controller/function.extension'
-response.generic_patterns = ['*'] if request.is_local else []
+# response.generic_patterns = ['*'] if request.is_local else []
 ## choose a style for forms
-response.formstyle = myconf.take('forms.formstyle')  # or 'bootstrap3_stacked' or 'bootstrap2' or other
-response.form_label_separator = myconf.take('forms.separator')
+# response.formstyle = myconf.take('forms.formstyle')  # or 'bootstrap3_stacked' or 'bootstrap2' or other
+# response.form_label_separator = myconf.take('forms.separator')
 
 
 ## (optional) optimize handling of static files
@@ -39,20 +39,20 @@ response.form_label_separator = myconf.take('forms.separator')
 ## (more options discussed in gluon/tools.py)
 #########################################################################
 
-from gluon.tools import PluginManager, Auth #, Service
+from gluon.tools import Auth #, Service, PluginManager
 
 auth = Auth(db)
 # service = Service()
-plugins = PluginManager()
+# plugins = PluginManager()
 
 ## create all tables needed by auth if not custom tables
 # auth.define_tables(username=False, signature=False)
 
 ## configure email
-mail = auth.settings.mailer
-mail.settings.server = 'logging' if request.is_local else myconf.take('smtp.server')
-mail.settings.sender = myconf.take('smtp.sender')
-mail.settings.login = myconf.take('smtp.login')
+# mail = auth.settings.mailer
+# mail.settings.server = 'logging' if request.is_local else myconf.take('smtp.server')
+# mail.settings.sender = myconf.take('smtp.sender')
+# mail.settings.login = myconf.take('smtp.login')
 
 ## configure auth policy
 # auth.settings.registration_requires_verification = False

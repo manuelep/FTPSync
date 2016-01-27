@@ -5,7 +5,7 @@ from gluon import current
 from gluon.storage import List
 from ftplib import FTP
 from io import BytesIO
-from app.utils import prettydate
+from baseapp.utils import prettydate
 import datetime
 import hashlib
 import os
@@ -16,7 +16,7 @@ import xlrd, csv
 class Elaborate(object):
 
     @staticmethod
-    def get_dest_parts(archname):
+    def _get_dest_parts(archname):
         return (
             current.appconf[archname].get("dest_path") or current.appconf.get("misc", {}).get("dest_path"),
             current.appconf[archname].get("dest_name"),
@@ -25,8 +25,8 @@ class Elaborate(object):
     @classmethod
     def copy(cls, tab, row):
         """ Copy file to their destination """
-        assert row.archname in ("arch_2", "arch_3", "arch_4", "arch_5",), "Wrong archive!"
-        dest_path, dest_name = cls.get_dest_parts(row.archname)
+#         assert row.archname in ("arch_2", "arch_3", "arch_4", "arch_5",), "Wrong archive!"
+        dest_path, dest_name = cls._get_dest_parts(row.archname)
         if not dest_path is None:
             (filename, stream) = tab.archive.retrieve(row.archive)
             if dest_name is None:
@@ -93,8 +93,8 @@ class Elaborate(object):
         Unzip ADVFile archive content to their destination and convert xls
         format to csv applying refill to base price.
         """
-        assert row.archname=="arch_1", "Wrong archive!"
-        dest_path, dest_name = cls.get_dest_parts(row.archname)
+#         assert row.archname=="arch_1", "Wrong archive!"
+        dest_path, dest_name = cls._get_dest_parts(row.archname)
         if not dest_path is None:
             (filename, stream) = tab.archive.retrieve(row.archive)
             with zipfile.ZipFile(stream, "r") as adv:
@@ -109,8 +109,10 @@ class Elaborate(object):
 
     @classmethod
     def extract_tabs(cls, tab, row):
+        """ Split tabs of a single xls file into multiple csv """
 
-        def _get_value(cell):
+        def _uenc(cell):
+            """ Encode unicode value to system encoding """
             value = cell.value
             if isinstance(value, basestring):
                 return value.encode("utf8")
@@ -128,7 +130,7 @@ class Elaborate(object):
                         csvwriter.writeheader()
                         for rindex in xrange(1, sheet.nrows):
                             xls_row = sheet.row(rindex)
-                            csv_row_content = dict(zip(fieldnames, (_get_value(c) for c in xls_row)))
+                            csv_row_content = dict(zip(fieldnames, (_uenc(c) for c in xls_row)))
                             csvwriter.writerow(csv_row_content)
 
     @classmethod
@@ -141,29 +143,6 @@ class Elaborate(object):
             cls.extract_tabs(tab, row)
         else:
             cls.copy(tab, row)
-
-
-# def elaborate(table, row):
-#     default_refill = 15/100.
-#     if row.archname == "":
-#         # Creazione nuovo csv con nuovi prezzi
-#         pass
-# 
-#     # Al momento _ogni_ tipo di file va spostato in una sua destinazione per l'importazione
-#     if "dest_path" in current.appconf[row.archname] and current.appconf[row.archname].dest_path:
-# 
-#         dest_path = current.appconf[row.archname].dest_path
-# 
-#         (filename, stream) = table.archive.retrieve(row.archive)
-# 
-#         if "dest_name" in current.appconf[row.archname] and current.appconf[row.archname].dest_name:
-#             dest_name = current.appconf[row.archname].dest_name
-#         else:
-#             dest_name = filename
-# 
-#         # sposta il file in destinazione
-#         shutil.copyfileobj(stream, open(os.path.join(dest_path, dest_name), 'wb'))
-#         current.logger.debug("File %s successfully copied to: %s" % (dest_name, dest_path,))
     
 
 class Digger(object):

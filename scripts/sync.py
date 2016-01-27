@@ -5,21 +5,20 @@
 # mypool = Pool(1)
 # p.map(f, [1, 2, 3])
 
-class Fetcher(object):
+def _clean():
+    db.archive.truncate("CASCADE")
+    try:
+        shutil.rmtree(archive_upload_path)
+    except:
+        pass
 
-    @staticmethod
-    def _iter():
-        for k,v in appconf.iteritems():
-            if k.startswith("ftp_"):
-                yield k
-
-    @classmethod
-    def run(cls):
-
-        for k in cls._iter():
-#             _main = lambda t: fetchall(k, t)
-#             mypool.map(_main, [0, 900, 1800, 5400])
-            fetchall(k)
+def main():
+    for k in appconf.iterkeys():
+        if k.startswith("ftp_"):
+            res = fetchall(k)
+            logger.info("Fetched %(len)s archives: %(fetched_archives)s" % res)
 
 if __name__ == "__main__":
-    Fetcher.run()
+    if 1 and current.development:
+        _clean()
+    main()

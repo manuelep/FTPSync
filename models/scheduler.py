@@ -26,14 +26,6 @@ db.define_table("archive",
 db.archive.modified_on.readable = True
 db.archive._enable_record_versioning()
 
-if current.development:
-    db.archive.truncate("CASCADE")
-    try:
-        shutil.rmtree(archive_upload_path)
-#         shutil.rmtree(os.path.join(request.folder, 'uploads/test'))
-    except:
-        pass
-
 def fetchall(source="ftp_1", waits=0):
 
     if waits>0:
@@ -67,7 +59,7 @@ def fetchall(source="ftp_1", waits=0):
                 if nfo["source"] == source:
                     oo.fetch(k, **nfo)
     return {
-        "fetched_archives": archives,
+        "fetched_archives": dict(archives),
         "len": len(archives),
     }
 
