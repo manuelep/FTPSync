@@ -26,7 +26,7 @@ def path(p):
         mypath = os.path.expanduser('~'+p)
     else:
         mypath = os.path.join(os.getcwd(), request.folder, p)
-    if current.development and not os.path.exists(mypath):
+    if not current.development and not os.path.exists(mypath):
         os.makedirs(mypath)
     return mypath
 
