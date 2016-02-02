@@ -23,7 +23,10 @@ else:
 
 def path(p):
     if p.startswith("/"):
-        mypath = os.path.expanduser('~'+p)
+        if current.development:
+            mypath = os.path.expanduser('~'+p)
+        else:
+            mypath = p
     else:
         mypath = os.path.join(os.getcwd(), request.folder, p)
     if not current.development and not os.path.exists(mypath):
