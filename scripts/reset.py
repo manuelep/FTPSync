@@ -2,6 +2,7 @@
 
 def _clean():
     db.archive.truncate("CASCADE")
+    db.commit()
     for path in (archive_upload_path, appconf.misc.dest_path):        
         try:
             shutil.rmtree(path)

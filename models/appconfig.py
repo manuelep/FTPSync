@@ -23,12 +23,12 @@ else:
 
 def path(p):
     if p.startswith("/"):
-        return p
+        mypath = os.path.expanduser('~'+p)
     else:
         mypath = os.path.join(os.getcwd(), request.folder, p)
-        if not os.path.exists(mypath):
-            os.makedirs(mypath)
-        return mypath
+    if not os.path.exists(mypath):
+        os.makedirs(mypath)
+    return mypath
 
 appconf = nested.load(myconf,
     migrate = bool,

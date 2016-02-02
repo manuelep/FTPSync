@@ -22,6 +22,40 @@ class Elaborate(object):
             current.appconf[archname].get("dest_name"),
         )
 
+    @staticmethod
+    def _get_new_path(an, fp, i=None):
+        pt, fn = os.path.split(fp)
+        _raw_uuids = current.appconf[an].get("csvuuids")
+        uuids = _raw_uuids and _raw_uuids.split(',')
+        if i is None:
+            nfn = fn.replace(".xls", ".csv")
+        else:
+            nfn = fn.replace(".xls", "_tab%s.csv" % i)
+
+        if uuids:
+            mypath = os.path.join(pt, uuids[i or 0])
+            if not os.path.exists(mypath):
+                os.makedirs(mypath)
+            return os.path.join(mypath, nfn)
+        else:
+            return os.path.join(pt, nfn)
+
+    @staticmethod
+    def _read_not_empty_rows_from_sheet(sheet):
+        def _uenc(cell):
+            """ Encode unicode value to system encoding """
+            value = cell.value
+            if isinstance(value, basestring):
+                return value.encode("utf8")
+            else:
+                return value
+        for ridx in xrange(sheet.nrows):
+            values = [_uenc(c) for c in sheet.row(ridx)]
+            if any(values):
+                yield values
+            else:
+                continue
+
     @classmethod
     def copy(cls, tab, row):
         """ Copy file to their destination """
@@ -55,7 +89,7 @@ class Elaborate(object):
                     
  
     @classmethod
-    def _apply_refills(cls, filepath):
+    def _apply_refills(cls, filepath, archname):
         default_refill = 15
         refills = cls._get_refills()
         _get_refill = lambda cat: float(refills.get(cat, 0)) or default_refill
@@ -73,15 +107,18 @@ class Elaborate(object):
                 rounded_price = "%.2f" % full_price
                 return rounded_price.replace(".", ",")
 
-        with xlrd.open_workbook(filepath) as ADVxls, open(filepath.replace(".xls", ".csv"), "w") as ADVcsv:
+        newfilepath = cls._get_new_path(archname, filepath)
+
+        with xlrd.open_workbook(filepath) as ADVxls, open(newfilepath, "w") as ADVcsv:
             ADVsheet = ADVxls.sheet_by_index(0)
             new_col_head = "Prezzo Newirbel"
-            fieldnames = [c.value.encode("utf8") for c in ADVsheet.row(0)] + [new_col_head]
+
+            allvalues = cls._read_not_empty_rows_from_sheet(ADVsheet)
+            fieldnames=allvalues.next()+[new_col_head]
             csvwriter = csv.DictWriter(ADVcsv, fieldnames=fieldnames)
             csvwriter.writeheader()
-            for rindex in xrange(1, ADVsheet.nrows):
-                xls_row = ADVsheet.row(rindex)
-                csv_row_content = dict(zip(fieldnames, (c.value.encode("utf8") for c in xls_row)))
+            for values in allvalues:
+                csv_row_content = dict(zip(fieldnames, values))
                 full_price = _get_full_price(csv_row_content)
                 if not full_price is None:
                     csv_row_content[new_col_head] = full_price
@@ -105,32 +142,27 @@ class Elaborate(object):
                 os.rename(os.path.join(dest_path, advfilename), dest_file_path)
             else:
                 dest_file_path = os.path.join(dest_path, advfilename)
-            cls._apply_refills(dest_file_path)
+            cls._apply_refills(dest_file_path, row.archname)
 
     @classmethod
     def extract_tabs(cls, tab, row):
         """ Split tabs of a single xls file into multiple csv """
 
-        def _uenc(cell):
-            """ Encode unicode value to system encoding """
-            value = cell.value
-            if isinstance(value, basestring):
-                return value.encode("utf8")
-            else:
-                return value
-
         filepath = cls.copy(tab, row)
         if not filepath is None:
+            
             with xlrd.open_workbook(filepath) as xlsSRC:
                 for sindex in xrange(xlsSRC.nsheets):
                     sheet = xlsSRC.sheet_by_index(sindex)
-                    with open(filepath.replace(".xls", "_tab%s.csv" % sindex), "w") as csvDEST:
-                        fieldnames = [c.value.encode("utf8") for c in sheet.row(0)]
+                    newfilename = cls._get_new_path(row.archname, filepath, sindex)
+                    allvalues = cls._read_not_empty_rows_from_sheet(sheet)
+
+                    with open(newfilename, "w") as csvDEST:
+                        fieldnames = allvalues.next()
                         csvwriter = csv.DictWriter(csvDEST, fieldnames=fieldnames)
                         csvwriter.writeheader()
-                        for rindex in xrange(1, sheet.nrows):
-                            xls_row = sheet.row(rindex)
-                            csv_row_content = dict(zip(fieldnames, (_uenc(c) for c in xls_row)))
+                        for values in allvalues:
+                            csv_row_content = dict(zip(fieldnames, values))
                             csvwriter.writerow(csv_row_content)
 
     @classmethod
