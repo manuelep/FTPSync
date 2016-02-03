@@ -34,7 +34,7 @@ class Elaborate(object):
 
         if uuids:
             mypath = os.path.join(pt, uuids[i or 0])
-            if not os.path.exists(mypath):
+            if current.development and not os.path.exists(mypath):
                 os.makedirs(mypath)
             return os.path.join(mypath, nfn)
         else:
