@@ -21,15 +21,13 @@ else:
 
 #current.myconf = myconf
 
-def path(p):
+def lpath(p):
+    """ Local path """
     if p.startswith("/"):
-        if current.development:
-            mypath = os.path.expanduser('~'+p)
-        else:
-            mypath = p
+        mypath = p if not current.development else os.path.expanduser('~'+p)
     else:
         mypath = os.path.join(os.getcwd(), request.folder, p)
-    if not current.development and not os.path.exists(mypath):
+    if not os.path.exists(mypath):
         os.makedirs(mypath)
     return mypath
 
@@ -37,8 +35,7 @@ appconf = nested.load(myconf,
     migrate = bool,
     pool_size = int,
     period = int,
-    dest_path = path,
-    path = path
+    tmp_path = lpath
 )
 
 current.appconf = appconf
@@ -46,5 +43,5 @@ current.appconf = appconf
 
 #                                                                 ### LOGGER ###
 
-logger = get_configured_logger(request.application)
+logger = get_configured_logger(request.application or "debug")
 current.logger = logger

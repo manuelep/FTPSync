@@ -8,7 +8,7 @@
 def main():
     for k in appconf.iterkeys():
         if k.startswith("ftp_"):
-            res = fetchall(k)
+            res = fetchall(k, force=current.development)
             logger.info("Fetched %(len)s archives: %(fetched_archives)s" % res)
 
 if __name__ == "__main__":

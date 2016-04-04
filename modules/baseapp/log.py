@@ -4,6 +4,7 @@
 import os, logging, logging.handlers
 
 from gluon import *
+from gluon import current
 
 def get_configured_logger(name):
     """ Courtesy of: http://www.web2pyslices.com/slice/show/1416/logging
@@ -18,7 +19,7 @@ def get_configured_logger(name):
         formatter="%(asctime)s %(levelname)s %(process)s %(thread)s %(funcName)s():%(lineno)d %(message)s"
         handler = logging.handlers.RotatingFileHandler(
             os.path.join(current.request.folder, 'private', current.request.application+'.log'),
-            maxBytes = 2**20,
+            maxBytes = 5*2**20,
             backupCount = 2
         )
         handler.setFormatter(logging.Formatter(formatter))

@@ -26,7 +26,9 @@ db.define_table("archive",
 db.archive.modified_on.readable = True
 db.archive._enable_record_versioning()
 
-def fetchall(source="ftp_1", waits=0):
+def fetchall(source="ftp_p", waits=0, force=False):
+
+    logger.debug("=== FETCHALL ===: Starting to fetching all data from: %s" % source)
 
     if waits>0:
         time.sleep(waits)
@@ -38,6 +40,7 @@ def fetchall(source="ftp_1", waits=0):
         groupby = db.archive.archname,
     )
 
+    now = datetime.datetime.now()
     def checkrepo(archname):
         fres = res.find(lambda r: r.archive.archname==archname, limitby=(0,1,)).first()
         if fres is None:
@@ -45,22 +48,28 @@ def fetchall(source="ftp_1", waits=0):
             return True
         else:
             # se ultima modifica è troppo vecchia
-            delta = (datetime.datetime.now()-fres[last_update])
+            delta = (now-fres[last_update])
             return delta.total_seconds()>=appconf[archname]["period"]
 
     # downloadable archives
     archives = dict([(k,v) for k,v in appconf.iteritems() \
-        if k.startswith('arch_') and v.get('source')==source and checkrepo(k)
+        if k.startswith('arch_') and v.get('source')==source and (force or checkrepo(k))
     ])
 
     if len(archives)>0:
         with Digger(table=db.archive, **appconf[source]) as oo:
             for k,nfo in archives.iteritems():
-                if nfo["source"] == source:
+                current.logger.debug("Considering archive: %s" % k)
+                if nfo["source"] == source and not "ignore" in nfo:
                     oo.fetch(k, **nfo)
+#             oo.rsync()
     return {
         "fetched_archives": dict(archives),
         "len": len(archives),
     }
+
+def rsync(source="ftp_1"):
+    with Digger(table=db.archive, **appconf[source]) as oo:
+        return oo.rsync()
 
 #scheduler = Scheduler(db, tasks=dict(fetchall=fetchall), migrate=appconf.db.migrate)
