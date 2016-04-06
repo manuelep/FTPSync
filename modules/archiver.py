@@ -263,8 +263,10 @@ class Digger(object):
 
         return out or None
 
-    def rsync(self):
-        dest_nfo = self._get_dest_parts()
+    @staticmethod
+    def rsync():
+
+        dest_nfo = _get_dest_parts2()
 
         if dest_nfo.get("protocol") == "ssh":
             # Copy to remote destination using SSH/SFTP protocol with Paramiko
@@ -279,36 +281,67 @@ class Digger(object):
             )
             start = datetime.datetime.now()
             sftp = client.open_sftp()
-    
-            for __dirpath, __dirnames, filenames in os.walk(Elaborate.path):
+
+            for dirpath, __dirnames, filenames in os.walk(dest_nfo["tmp_path"]):
+                if dirpath==dest_nfo["tmp_path"]:
+                    continue
                 for filename in filenames:
-                    source_file_path = os.path.join(Elaborate.path, filename)
-                    dest_file_path = os.path.join(dest_nfo["path"], filename)
-                    # Use paramiko: http://stackoverflow.com/a/11519239/1039510
+                    source_path = os.path.join("/", os.path.relpath(dirpath, dest_nfo["tmp_path"]))
+                    source_file_path = os.path.join(dirpath, filename)
+                    dest_file_path = os.path.join(source_path, filename)
                     err = False
                     try:
                         sftp.put(source_file_path, dest_file_path)
                     except Exception as error:
                         err = True
+                    else:
+                        if filename.endswith(".zip"):
+
+                            commands = [
+                                'unzip -o -d %(source_path)s %(dest_file_path)s' % locals(),
+                                'mv %(source_path)s/images/* %(source_path)s/' % locals(),
+                                'rmdir %(source_path)s/images' % locals()
+                            ]
+
+                            for command in commands:
+                                current.logger.debug("Executing: %(command)s" % locals())
+                                chan = client.get_transport().open_session()
+                                chan.exec_command(command)
+                                exit_status = chan.recv_exit_status()
+                                if exit_status==0:
+                                    current.logger.debug("Success!")
+                                else:
+                                    current.logger.info("Error:")
+                                    current.logger.info(chan.makefile_stderr().read())
+                                chan.close()
                     finally:
-                        if conn:
-                            conn.close()
-                            logger.debug("File transfer via SFTP started: %s" % prettydate(start))
                         if err:
+                            if conn:
+                                conn.close()
                             raise error
-                shutil.rmtree(Elaborate.path)
-                os.makedirs(Elaborate.path)
+                        else:
+                            current.logger.debug("File transfer via SFTP started: %s" % prettydate(start))
+                            current.logger.debug("Transfered %s to %s" % (source_file_path, dest_file_path))
+            if conn:
+                conn.close()
+                if not current.development:
+                    os.rmtree(dest_nfo["tmp_path"])
+
         elif dest_nfo.get("protocol") is None:
             # Copy to local destination
             start = datetime.datetime.now()
-            for __dirpath, __dirnames, filenames in os.walk(Elaborate.path):
+            for __dirpath, __dirnames, filenames in os.walk(dest_nfo["tmp_path"]):
                 for filename in filenames:
-                    source_file_path = os.path.join(Elaborate.path, filename)
-                    dest_file_path = os.path.join(dest_nfo["path"], filename)
+                    source_file_path = os.path.join(dirpath, filename)
+                    dest_path = os.path.join("/", os.path.relpath(dirpath, dest_nfo["tmp_path"]))
+                    dest_file_path = os.path.join(dest_path, filename)
                     shutil.move(source_file_path, dest_file_path)
-            logger.debug("Local file transfer started: %s" % prettydate(start))
+            current.logger.debug("Local file transfer started: %s" % prettydate(start))
         else:
             raise NotImplementedError
+
+        os.rmtree(dest_nfo["tmp_path"])
+
 
     def retrieve(self, filename):
         """
@@ -336,7 +369,7 @@ class Digger(object):
         stream.close()
         return newfilename, checksum
 
-    def fetch(self, archname, remote_path, period, name_starts=None, extension=None, **kw):
+    def fetch(self, archname, source_path, period, name_starts=None, extension=None, **kw):
 
         def _get_last_path(*path):
             _dir = path[-1]
@@ -349,15 +382,16 @@ class Digger(object):
 
         now = datetime.datetime.now()
 
-        rpath = remote_path
-        remote_path = _get_last_path(*os.path.split(rpath))
-        files = self.ftp.nlst(remote_path)
+        rpath = source_path
+        source_path = _get_last_path(*os.path.split(rpath))
+        files = self.ftp.nlst(source_path)
         nfiles = len(files)
         for n,filename in enumerate(files):
-            filepath = os.path.join(remote_path, filename)
+            filepath = os.path.join(source_path, filename)
 
-            start = datetime.datetime.now()
-            if (name_starts is None or filename.lower().startswith(name_starts.lower())) and (extension is None or filename.endswith(extension)):
+            if (name_starts is None or filename.lower().startswith(name_starts.lower())) \
+                and (extension is None or filename.endswith(extension)):
+                start = datetime.datetime.now()
 
                 if current.development:
                     self.ftp.sendcmd("TYPE i")
@@ -372,7 +406,7 @@ class Digger(object):
                 last_fs_update = datetime.datetime.strptime(self.ftp.sendcmd('MDTM ' + filepath)[4:], "%Y%m%d%H%M%S")
 
                 if is_in_db==0:
-                    current.logger.debug("New file detected and downloaded.")
+                    current.logger.info("New file detected and downloaded.")
                     newfilename, filehash = self.retrieve(filepath)
                     id = self.table.insert(
                         filename = filename,
@@ -388,7 +422,7 @@ class Digger(object):
                     row = self.db(self.db.archive.filename==filename).select(limitby=(0,1)).first()
                     if (now-row.last_update).total_seconds()>=period:
                         if row.last_update < last_fs_update:
-                            current.logger.debug("Detected file that needs update.")
+                            current.logger.info("Detected file that needs update.")
                             newfilename, filehash = self.retrieve(filepath)
                             row.update_record(
                                 archive = newfilename,
@@ -402,7 +436,7 @@ class Digger(object):
                             current.logger.info("It's time to update file but no new version found")
                     else:
                         current.logger.info("File still updated.")
+                current.logger.info("=== Fetching file operation terminated (Started: %s) ===\n" % prettydate(start))
             else:
                 current.logger.debug("%s, %s" % (name_starts, extension,))
-            current.logger.info("Fetched %s files on %s" % (n+1, nfiles,))
-            current.logger.info("=== Fetching file operation terminated (Started: %s) ===\n" % prettydate(start))
+            

@@ -5,6 +5,7 @@ from gluon import current
 from storage import Storage
 from baseapp.utils import nested
 from baseapp.log import get_configured_logger
+from curses.ascii import isdigit
 
 
 #                                                            ### CONF LOADER ###
@@ -31,11 +32,19 @@ def lpath(p):
         os.makedirs(mypath)
     return mypath
 
+def boolean(v):
+    v = v.strip()
+    if v:
+        if isdigit(v):
+            return bool(int(v))
+    return bool(v)
+
 appconf = nested.load(myconf,
-    migrate = bool,
+    migrate = boolean,
     pool_size = int,
     period = int,
-    tmp_path = lpath
+    tmp_path = lpath,
+    ignore = boolean
 )
 
 current.appconf = appconf

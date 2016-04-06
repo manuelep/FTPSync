@@ -26,7 +26,9 @@ db.define_table("archive",
 db.archive.modified_on.readable = True
 db.archive._enable_record_versioning()
 
-def fetchall(source="ftp_p", waits=0, force=False):
+def fetchall(waits=0, force=False):
+
+    source = appconf.source.source
 
     logger.debug("=== FETCHALL ===: Starting to fetching all data from: %s" % source)
 
@@ -53,23 +55,21 @@ def fetchall(source="ftp_p", waits=0, force=False):
 
     # downloadable archives
     archives = dict([(k,v) for k,v in appconf.iteritems() \
-        if k.startswith('arch_') and v.get('source')==source and (force or checkrepo(k))
+        if k.startswith('arch_') and v.ignore!=True and (force or checkrepo(k))
     ])
 
     if len(archives)>0:
         with Digger(table=db.archive, **appconf[source]) as oo:
             for k,nfo in archives.iteritems():
                 current.logger.debug("Considering archive: %s" % k)
-                if nfo["source"] == source and not "ignore" in nfo:
-                    oo.fetch(k, **nfo)
-#             oo.rsync()
+                oo.fetch(k, **nfo)
+            oo.rsync()
     return {
         "fetched_archives": dict(archives),
         "len": len(archives),
     }
 
-def rsync(source="ftp_1"):
-    with Digger(table=db.archive, **appconf[source]) as oo:
-        return oo.rsync()
+def rsync():
+    Digger.rsync()
 
 #scheduler = Scheduler(db, tasks=dict(fetchall=fetchall), migrate=appconf.db.migrate)
