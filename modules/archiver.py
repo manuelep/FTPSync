@@ -340,7 +340,7 @@ class Digger(object):
         else:
             raise NotImplementedError
 
-        os.rmtree(dest_nfo["tmp_path"])
+        shutil.rmtree(dest_nfo["tmp_path"])
 
 
     def retrieve(self, filename):
@@ -353,7 +353,7 @@ class Digger(object):
         stream = BytesIO()
         start = datetime.datetime.now()
         self.ftp.retrbinary('RETR ' + filename, stream.write, 1024)
-        current.logger.debug("File '%s' download started: %s" % (filename, prettydate(start),))
+        current.logger.info("File '%s' download started: %s" % (filename, prettydate(start),))
         stream.seek(0)
         if self.checksum_required:
             filehash = hashlib.new('sha224')
