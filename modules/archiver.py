@@ -36,7 +36,10 @@ def _get_dest_parts2(archname=None):
 
     return out
 
+get_dest_parts = _get_dest_parts2
+
 class Elaborate(object):
+    """ Basic file operations """
 
     @staticmethod
     def _get_new_path(an, fp, i=None):
@@ -67,6 +70,7 @@ class Elaborate(object):
 
     @staticmethod
     def _read_not_empty_rows_from_sheet(sheet):
+
         def _uenc(cell):
             """ Encode unicode value to system encoding """
             value = cell.value
@@ -74,6 +78,7 @@ class Elaborate(object):
                 return value.encode("utf8")
             else:
                 return value
+
         for ridx in xrange(sheet.nrows):
             values = [_uenc(c) for c in sheet.row(ridx)]
             if any(values):
@@ -83,12 +88,12 @@ class Elaborate(object):
 
     @classmethod
     def unzip(cls, tab, row):
-        """ Unzip only first file in temporary local path """
+        """ Unzip single zipped file in temporary local path """
         dest_nfo = _get_dest_parts2(row.archname)
         dest_path = dest_nfo.get("path")[1:] if dest_nfo.get("path").startswith("/") else dest_nfo.get("path")
-        tmp_path = dest_nfo.get("path")
+        tmp_path = dest_nfo.get("tmp_path")
         if not tmp_path is None:
-            (filename, stream) = tab.archive.retrieve(row.archive)
+            (__filename, stream) = tab.archive.retrieve(row.archive)
             with zipfile.ZipFile(stream, "r") as adv:
                 advfilenames = adv.namelist()
                 assert len(advfilenames)==1, "Unsupported!"
@@ -97,9 +102,9 @@ class Elaborate(object):
                 mypath = os.path.join(tmp_path, dest_path)
                 if not os.path.exists(mypath):
                     os.makedirs(mypath)
-                
-                ext_path = os.path.join(mypath, advfilename)
-                adv.extract(advfilename, ext_path)
+
+                adv.extract(advfilename, mypath)
+            ext_path = os.path.join(mypath, advfilename)
             return ext_path
 
     @classmethod
@@ -141,7 +146,7 @@ class Elaborate(object):
         return refills
 
     @classmethod
-    def _export_sheet_to_csv(cls, sheet, newcsvpath, priceCol=None, catCol="Nome Categoria Catalogo"):
+    def _export_sheet_to_csv(cls, sheet, newcsvpath, priceCol=None, catCol="Categoria"):
         """
         sheet      @ADVSheetObject;
         newcsvpath @string : Path where to save the sheet in a single csv file; 
@@ -151,7 +156,7 @@ class Elaborate(object):
         """
 
         if not priceCol is None:
-            default_refill = 30
+            default_refill = current.appconf.conf_price.default_refill
             refills = cls._get_refills()
             _get_refill = lambda cat: float(refills.get(cat, 0)) or default_refill
 
@@ -160,7 +165,7 @@ class Elaborate(object):
 
             def _get_price():
                 price = row[priceCol]
-                if price in (None, "n.d.",):
+                if price in (None, "n.d.", '',):
                     return None
                 if isinstance(price, basestring):
                     return float(price.replace(",", "."))
@@ -194,74 +199,44 @@ class Elaborate(object):
                 csvwriter.writerow(csv_row_content)
 
     @classmethod
-    def extract_tabs(cls, archname, filepath, priceCol="prezzo", priceTab=0, removeOriginal=True):
+    def extract_tabs(cls, archname, filepath, removeOriginal=True,
+        priceCol = "Prezzo Base Rivenditore",
+        # Indicates the tab with the price column
+        priceTab = 0,
+        catCol = "Categoria",
+        # Extracts only the whole content of tab containing the price column (see priceTab)
+        priceOnly = True
+    ):
         """ Split tabs of a single xls file into multiple csv """
+
+        newcsvpaths = []
 
         with xlrd.open_workbook(filepath) as xlsSRC:
             for sindex in xrange(xlsSRC.nsheets):
-                sheet = xlsSRC.sheet_by_index(sindex)
-                newcsvpath = cls._get_new_path(archname, filepath, sindex)
-                if not newcsvpath is None:
-                    if sindex == priceTab:
-                        cls._export_sheet_to_csv(sheet, newcsvpath, priceCol=priceCol)
-                    else:
-                        cls._export_sheet_to_csv(sheet, newcsvpath, priceCol=None)
+
+                if not priceOnly or sindex == priceTab:
+
+                    sheet = xlsSRC.sheet_by_index(sindex)
+                    newcsvpath = cls._get_new_path(archname, filepath, sindex)
+                    if not newcsvpath is None:
+                        if sindex == priceTab:
+                            cls._export_sheet_to_csv(sheet, newcsvpath, priceCol=priceCol, catCol=catCol)
+                        else:
+                            cls._export_sheet_to_csv(sheet, newcsvpath, priceCol=None)
+                        newcsvpaths.append(newcsvpath)
 
         if removeOriginal:
             os.remove(filepath)
-
-    @classmethod
-    def run(cls, tab, row, removeTmp=False):
-        # Prezzi
-        if row.archname == "arch_pri":
-            fp = cls.unzip(tab, row)
-            cls.extract_tabs(row.archname, fp, priceCol="Prezzo Base Rivenditore", removeOriginal=removeTmp)
-        # Catalogo
-        elif row.archname == "arch_cat":
-            fp = cls.copy2(tab, row, rename=False)
-            cls.extract_tabs(row.archname, fp, removeOriginal=removeTmp)
-        # Altro
+            tmppath, _ = os.path.split(filepath)
+            try:
+                os.removedirs(tmppath)
+            except OSError:
+                pass
+            current.logger.info("File %s removed!" % filepath)
         else:
-            cls.copy2(tab, row, rename=True)
+            current.logger.debug("File %s NOT removed for debug!" % filepath)
 
-class Digger(object):
-    """"""
-
-    def __init__(self, url, user, passwd, table, checksum_required=True):
-        self.url = url
-        self.user = user
-        self.passwd = passwd
-        self.table = table
-        self.db = table._db
-        self.checksum_required = checksum_required
-
-    def __enter__(self):
-        self.ftp = FTP(self.url)
-        self.ftp.login(user=self.user, passwd=self.passwd)
-        return self
-
-    def __exit__(self, exception_type, exception_value, traceback):
-        self.ftp.quit()
-
-    def _truncate(self):
-        self.table.truncate('RESTART IDENTITY CASCADE')
-
-    @staticmethod
-    def _get_dest_parts():
-
-        out = {}
-
-        if "dest" in current.appconf:
-            dest = current.appconf["dest"]["dest"]
-            out.update({k: v for k,v in current.appconf["dest"].iteritems() if k!="dest"})
-        else:
-            dest = None
-
-        if not dest is None:
-            out.update(current.appconf[dest])
-            out["protocol"] = dest.split("_")[0]
-
-        return out or None
+        return newcsvpaths
 
     @staticmethod
     def rsync():
@@ -277,7 +252,7 @@ class Digger(object):
             conn = client.connect(dest_nfo["url"], 22,
                 username = dest_nfo["user"],
                 password = dest_nfo["passwd"],
-                timeout = 180
+                timeout = 15*60
             )
             start = datetime.datetime.now()
             sftp = client.open_sftp()
@@ -300,32 +275,32 @@ class Digger(object):
                             commands = [
                                 'unzip -o -d %(source_path)s %(dest_file_path)s' % locals(),
                                 'mv %(source_path)s/images/* %(source_path)s/' % locals(),
-                                'rmdir %(source_path)s/images' % locals()
+                                'rmdir %(source_path)s/images' % locals(),
+                                'rm -f %(source_path)s' % locals()
                             ]
 
                             for command in commands:
-                                current.logger.debug("Executing: %(command)s" % locals())
-                                chan = client.get_transport().open_session()
-                                chan.exec_command(command)
-                                exit_status = chan.recv_exit_status()
-                                if exit_status==0:
-                                    current.logger.debug("Success!")
-                                else:
-                                    current.logger.info("Error:")
-                                    current.logger.info(chan.makefile_stderr().read())
-                                chan.close()
+                                if command:
+                                    current.logger.debug("Executing: %(command)s" % locals())
+                                    chan = client.get_transport().open_session()
+                                    chan.exec_command(command)
+                                    exit_status = chan.recv_exit_status()
+                                    if exit_status==0:
+                                        current.logger.debug("Success!")
+                                    else:
+                                        current.logger.info("Error:")
+                                        current.logger.info(chan.makefile_stderr().read())
+                                    chan.close()
                     finally:
                         if err:
                             if conn:
                                 conn.close()
                             raise error
                         else:
-                            current.logger.debug("File transfer via SFTP started: %s" % prettydate(start))
-                            current.logger.debug("Transfered %s to %s" % (source_file_path, dest_file_path))
+                            current.logger.info("File transfer via SFTP started: %s" % prettydate(start))
+                            current.logger.info("Transfered %s to %s" % (source_file_path, dest_file_path))
             if conn:
                 conn.close()
-                if not current.development:
-                    os.rmtree(dest_nfo["tmp_path"])
 
         elif dest_nfo.get("protocol") is None:
             # Copy to local destination
@@ -340,8 +315,62 @@ class Digger(object):
         else:
             raise NotImplementedError
 
-        shutil.rmtree(dest_nfo["tmp_path"])
+        if not current.development:
+            shutil.rmtree(dest_nfo["tmp_path"])
 
+    @classmethod
+    def run(cls, tab, row, removeTmp=False):
+        # Prezzi
+        if row.archname == "arch_pri":
+            fp = cls.unzip(tab, row)
+            return cls.extract_tabs(row.archname, fp, removeOriginal=removeTmp)
+        # Catalogo
+        elif row.archname == "arch_cat":
+            fp = cls.copy2(tab, row, rename=False)
+            return cls.extract_tabs(row.archname, fp, removeOriginal=removeTmp, priceCol=None)
+        # Altro
+        else:
+            return cls.copy2(tab, row, rename=True)
+
+class DBSyncer(object):
+    """ Retrieve files from remote FTP repository and store into DB """
+
+    def __init__(self, url, user, passwd, table, checksum_required=True):
+        self.url = url
+        self.user = user
+        self.passwd = passwd
+        self.table = table
+        self.db = table._db
+        self.checksum_required = checksum_required
+
+    def __enter__(self):
+        self.ftp = FTP(self.url)
+        self.ftp.login(user=self.user, passwd=self.passwd)
+        return self
+
+    def __exit__(self, exception_type, exception_value, traceback):
+        self.ftp.quit()
+
+    def _truncate(self):
+        self.table.truncate('RESTART IDENTITY CASCADE')
+
+#     @staticmethod
+#     def _get_dest_parts():
+#         """ DEPRECATED """
+# 
+#         out = {}
+# 
+#         if "dest" in current.appconf:
+#             dest = current.appconf["dest"]["dest"]
+#             out.update({k: v for k,v in current.appconf["dest"].iteritems() if k!="dest"})
+#         else:
+#             dest = None
+# 
+#         if not dest is None:
+#             out.update(current.appconf[dest])
+#             out["protocol"] = dest.split("_")[0]
+# 
+#         return out or None
 
     def retrieve(self, filename):
         """
@@ -370,6 +399,7 @@ class Digger(object):
         return newfilename, checksum
 
     def fetch(self, archname, source_path, period, name_starts=None, extension=None, **kw):
+        success = False
 
         def _get_last_path(*path):
             _dir = path[-1]
@@ -393,12 +423,11 @@ class Digger(object):
                 and (extension is None or filename.endswith(extension)):
                 start = datetime.datetime.now()
 
+                current.logger.info("SI!: %s - %s, %s" % (filepath, name_starts, extension,))
+
                 if current.development:
                     self.ftp.sendcmd("TYPE i")
-                    try:
-                        filesize = self.ftp.size(filepath)
-                    except:
-                        import pdb;pdb.set_trace()
+                    filesize = self.ftp.size(filepath)
                     self.ftp.sendcmd("TYPE A")
                     current.logger.debug("File: %s (size: %s)" % (filename, sizeof_fmt(filesize),))
 
@@ -406,8 +435,9 @@ class Digger(object):
                 last_fs_update = datetime.datetime.strptime(self.ftp.sendcmd('MDTM ' + filepath)[4:], "%Y%m%d%H%M%S")
 
                 if is_in_db==0:
-                    current.logger.info("New file detected and downloaded.")
+                    current.logger.info("Downloading new file.")
                     newfilename, filehash = self.retrieve(filepath)
+                    success = True
                     id = self.table.insert(
                         filename = filename,
                         archname = archname,
@@ -417,13 +447,14 @@ class Digger(object):
                     )
                     row = self.table[id]
                     self.db.commit()
-                    Elaborate.run(self.table, row, removeTmp=(not current.development))
+#                     Elaborate.run(self.table, row, removeTmp=(not current.development))
                 else:
                     row = self.db(self.db.archive.filename==filename).select(limitby=(0,1)).first()
                     if (now-row.last_update).total_seconds()>=period:
                         if row.last_update < last_fs_update:
-                            current.logger.info("Detected file that needs update.")
+                            current.logger.info("Downloading updated file.")
                             newfilename, filehash = self.retrieve(filepath)
+                            success = True
                             row.update_record(
                                 archive = newfilename,
                                 last_update = last_fs_update,
@@ -431,12 +462,13 @@ class Digger(object):
     #                             is_active = True
                             )
                             self.db.commit()
-                            Elaborate.run(self.table, row, removeTmp=(not current.development))
+#                             Elaborate.run(self.table, row, removeTmp=(not current.development))
                         else:
                             current.logger.info("It's time to update file but no new version found")
                     else:
                         current.logger.info("File still updated.")
                 current.logger.info("=== Fetching file operation terminated (Started: %s) ===\n" % prettydate(start))
             else:
-                current.logger.debug("%s, %s" % (name_starts, extension,))
-            
+                current.logger.debug("NO!: %s - %s, %s" % (filepath, name_starts, extension,))
+
+        return success

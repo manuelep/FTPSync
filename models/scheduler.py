@@ -1,32 +1,11 @@
 # -*- coding: utf-8 -*-
 
 from scheduler import Scheduler
-from archiver import Digger
+from archiver import DBSyncer
 import datetime, time
 import shutil
 
-upload_rel_path = 'uploads/archive'
-archive_upload_path = os.path.join(request.folder, upload_rel_path)
-
-# File archive
-db.define_table("archive",
-    Field("filename", represent=lambda v,_: SPAN(v)),
-    Field("archname"),
-    Field("archive", "upload", uploadfolder=archive_upload_path, uploadseparate=True, autodelete=True),
-    Field("last_update", "datetime"), # last update timestamp as resulting from remote filesystem analysis
-    Field("checksum"),
-    Field('keep', 'boolean', default=True),
-    Field('is_active', 'boolean', writable=False, readable=False, default=True),
-    auth.signature.created_on,
-    auth.signature.modified_on,
-    format = "%(filename)s"
-#     common_filter = lambda query: db.archivio.is_active==True
-)
-
-db.archive.modified_on.readable = True
-db.archive._enable_record_versioning()
-
-def fetchall(waits=0, force=False):
+def dbsync(waits=0, force=False):
 
     source = appconf.source.source
 
@@ -58,18 +37,21 @@ def fetchall(waits=0, force=False):
         if k.startswith('arch_') and v.ignore!=True and (force or checkrepo(k))
     ])
 
+    fetched = {}
     if len(archives)>0:
-        with Digger(table=db.archive, **appconf[source]) as oo:
+        with DBSyncer(table=db.archive, **appconf[source]) as oo:
             for k,nfo in archives.iteritems():
                 current.logger.debug("Considering archive: %s" % k)
-                oo.fetch(k, **nfo)
-            oo.rsync()
+                success = oo.fetch(k, **nfo)
+                if success:
+                    fetched[k] = nfo
+            #oo.rsync()
     return {
-        "fetched_archives": dict(archives),
-        "len": len(archives),
+        "fetched_archives": fetched,
+        "len": len(fetched),
     }
 
-def rsync():
-    Digger.rsync()
+# def rsync():
+#     Digger.rsync()
 
 #scheduler = Scheduler(db, tasks=dict(fetchall=fetchall), migrate=appconf.db.migrate)

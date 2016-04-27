@@ -35,8 +35,11 @@ def lpath(p):
 def boolean(v):
     v = v.strip()
     if v:
-        if isdigit(v):
+        if len(v)==1 and isdigit(v):
             return bool(int(v))
+        if isinstance(v, basestring):
+            import json
+            return json.loads(v)
     return bool(v)
 
 appconf = nested.load(myconf,
@@ -44,7 +47,8 @@ appconf = nested.load(myconf,
     pool_size = int,
     period = int,
     tmp_path = lpath,
-    ignore = boolean
+    ignore = boolean,
+    default_refill = int
 )
 
 current.appconf = appconf
