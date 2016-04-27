@@ -274,21 +274,26 @@ class Elaborate(object):
 
                             commands = [
                                 'unzip -o -d %(source_path)s %(dest_file_path)s' % locals(),
+                                # Rimozione degli archivi originari (solo se unzip ha successo [1])
+                                'rm -f %(dest_file_path)s' % locals(),
+                                # I due passaggi che seguono sono utili SOLO per l'archivio delle immagini delle ditte
                                 'mv %(source_path)s/images/* %(source_path)s/' % locals(),
                                 'rmdir %(source_path)s/images' % locals(),
-                                'rm -f %(source_path)s' % locals()
                             ]
 
-                            for command in commands:
-                                if command:
-                                    current.logger.debug("Executing: %(command)s" % locals())
+                            exit_status = 0
+                            for n,command in enumerate(commands):
+                                # [1] Non eseguo il comando se il passo precedente non è uscito con successo
+                                if command and exit_status==0 or n!=1:
+                                    current.logger.info("Executing: %(command)s" % locals())
                                     chan = client.get_transport().open_session()
                                     chan.exec_command(command)
+                                    # wait for result
                                     exit_status = chan.recv_exit_status()
                                     if exit_status==0:
-                                        current.logger.debug("Success!")
+                                        current.logger.info("Command exited with success!")
                                     else:
-                                        current.logger.info("Error:")
+                                        current.logger.error("Running command raised exception:")
                                         current.logger.info(chan.makefile_stderr().read())
                                     chan.close()
                     finally:
