@@ -38,38 +38,63 @@ def _get_dest_parts2(archname=None):
 
 get_dest_parts = _get_dest_parts2
 
-class Elaborate(object):
-    """ Basic file operations """
+def _keep_fs_clean(filepath):
+    os.remove(filepath)
+    tmppath, _ = os.path.split(filepath)
+    try:
+        os.removedirs(tmppath)
+    except OSError as err:
+        current.logger.debug("Folder %s NOT removed!" % tmppath)
+        current.logger.debug(str(err))
+    current.logger.info("File %s removed!" % filepath)
 
-    @staticmethod
-    def _get_new_path(an, fp, i=None):
-        """
-        an @string  : Archive name
-        fp @string  : File path
-        i  @integer : Index
-        """
-        pt, fn = os.path.split(fp)
-        _raw_uuids = current.appconf[an].get("csvuuids")
-        uuids = _raw_uuids and _raw_uuids.split(',')
-        dest_nfo = _get_dest_parts2(an)
+keep_fs_clean = _keep_fs_clean
 
-        rpl = ".csv" if i is None else "_tab%s.csv" % i
-        nfn = (dest_nfo.get("name") or fn).replace(".xls", rpl)
+def _get_new_path(an, pt, fn, i=None):
+    """
+    an @string  : Archive name;
+    pt @string  : Path to file;
+    fn @string  : Fiel name;
+    i  @integer : Tab index.
+    """
+    _raw_uuids = current.appconf[an].get("csvuuids")
+    uuids = _raw_uuids and _raw_uuids.split(',')
+    dest_nfo = _get_dest_parts2(an)
 
-        if uuids:
-            try:
-                mypath = os.path.join(pt, uuids[i or 0])
-            except IndexError:
-                return None
-            else:
-                if not os.path.exists(mypath):
-                    os.makedirs(mypath)
-                return os.path.join(mypath, nfn)
+    rpl = ".csv" if i is None else "_tab%s.csv" % i
+    nfn = (dest_nfo.get("name") or fn).replace(".xls", rpl)
+
+    if uuids:
+        try:
+            pt = os.path.join(pt, uuids[i or 0])
+        except IndexError:
+            pass
         else:
-            return os.path.join(pt, nfn)
+            if not os.path.exists(pt):
+                os.makedirs(pt)
+    return os.path.join(pt, nfn)
 
-    @staticmethod
-    def _read_not_empty_rows_from_sheet(sheet):
+get_new_path = _get_new_path
+
+def _get_dest_path(archname):
+    """ Build destination path from configuration and eventually create missing directories """
+    dest_nfo = get_dest_parts(archname)
+    dest_path = dest_nfo.get("path")[1:] if dest_nfo.get("path").startswith("/") else dest_nfo.get("path")
+    tmp_path = dest_nfo["tmp_path"]
+    mypath = os.path.join(tmp_path, dest_path)
+    if not os.path.exists(mypath):
+        os.makedirs(mypath)
+    return mypath
+
+get_dest_path = _get_dest_path
+
+class SheetReader(object):
+
+    def __init__(self, sheet):
+        self.sheet = sheet
+        self.header = self._read().next()
+
+    def _read(self, start=0):
 
         def _uenc(cell):
             """ Encode unicode value to system encoding """
@@ -79,54 +104,46 @@ class Elaborate(object):
             else:
                 return value
 
-        for ridx in xrange(sheet.nrows):
-            values = [_uenc(c) for c in sheet.row(ridx)]
+        for ridx in xrange(start, self.sheet.nrows):
+            values = [_uenc(c) for c in self.sheet.row(ridx)]
             if any(values):
                 yield values
             else:
                 continue
 
-    @classmethod
-    def unzip(cls, tab, row):
-        """ Unzip single zipped file in temporary local path """
-        dest_nfo = _get_dest_parts2(row.archname)
-        dest_path = dest_nfo.get("path")[1:] if dest_nfo.get("path").startswith("/") else dest_nfo.get("path")
-        tmp_path = dest_nfo.get("tmp_path")
-        if not tmp_path is None:
-            (__filename, stream) = tab.archive.retrieve(row.archive)
-            with zipfile.ZipFile(stream, "r") as adv:
-                advfilenames = adv.namelist()
-                assert len(advfilenames)==1, "Unsupported!"
-                advfilename = advfilenames[0]
+    def __call__(self):
+        for r in self._read(1):
+            yield dict(zip(self.header, r))
 
-                mypath = os.path.join(tmp_path, dest_path)
-                if not os.path.exists(mypath):
-                    os.makedirs(mypath)
+class stock(object):
 
-                adv.extract(advfilename, mypath)
-            ext_path = os.path.join(mypath, advfilename)
-            return ext_path
+    sku = "Product SKU"
+
+    # "Product ID","Product SKU","Product Name",Price,"In Stock","Stock Quantity"
+    api = [
+        {"name": sku, "cast": lambda l: l[0:6], "limits": (1,6,)},
+        {"name": "Product Name", "cast": lambda l: l[6:82].strip(), "limits": (7, 82,)},
+        {"name": "Price"},
+        # If the value of the In Stock indicator is empty, zero, or "no", the product is considered to be out of stock;
+        # all other values are taken to mean that the product is in stock.
+        {"name": "In Stock", "cast": lambda *_, **__: "X"},
+        {"name": "Stock Quantity", "cast": lambda l: int(l[82:87]), "limits": (83, 87,)}
+    ]
 
     @classmethod
-    def copy2(cls, tab, row, rename=True):
-        """ Copy result file in temporary local path """
-        dest_nfo = _get_dest_parts2(row.archname)
-        dest_path = dest_nfo.get("path")[1:] if dest_nfo.get("path").startswith("/") else dest_nfo.get("path")
-        tmp_path = dest_nfo.get("tmp_path")
-        if not dest_nfo.get("path") is None:
-            (filename, stream) = tab.archive.retrieve(row.archive)
-            if rename:
-                dest_name = dest_nfo.get("name") or filename
-            else:
-                dest_name = filename
-            dest_path = os.path.join(tmp_path, dest_path)
-            if not os.path.exists(dest_path):
-                os.makedirs(dest_path)
-            dest_file_path = os.path.join(dest_path, dest_name)
-            shutil.copyfileobj(stream, open(dest_file_path, 'wb'))
+    def header(cls):
+        return [i["name"] for i in cls.api]
 
-            current.logger.debug("File %s successfully copied to: %s" % (dest_name, dest_path,))
-            return dest_file_path
+    @classmethod
+    def read(cls, stream):
+        for line in stream.readlines():
+            yield {nfo["name"]: nfo.get("cast", lambda *_: "")(line) for nfo in cls.api}
+        
+class Refiller(object):
+
+    def __init__(self):
+        self.refills = self._get_refills()
+        self.default_refill = current.appconf.conf_price.default_refill
 
     @staticmethod
     def _get_refills():
@@ -145,197 +162,362 @@ class Elaborate(object):
             refills = {}
         return refills
 
-    @classmethod
-    def _export_sheet_to_csv(cls, sheet, newcsvpath, priceCol=None, catCol="Categoria"):
+    def __call__(self, cat, v):
         """
-        sheet      @ADVSheetObject;
-        newcsvpath @string : Path where to save the sheet in a single csv file; 
-        priceCol   @string : Name of the column to which apply th refill;
-        catCol     @string : Name of the column of categories used to get the right refill.
-        WARNING: Only if priceCol is given it will try to apply refill.
+        cat @string : Categoria
+        v    @float : Valore del prezzo base rivenditore
         """
+        r = float(self.refills.get(cat, 0)) or self.default_refill
+        return ((100+r)/100.)*v
 
-        if not priceCol is None:
-            default_refill = current.appconf.conf_price.default_refill
-            refills = cls._get_refills()
-            _get_refill = lambda cat: float(refills.get(cat, 0)) or default_refill
+def load_duplicates(fp):
 
-        def _get_full_price(row):
-            refill = _get_refill(row[catCol])
+    puk = "Codice Spicers"
+    cats = (
+        "Nome Categoria Catalogo",
+        "Nome Gruppo Catalogo Standard",
+        "Nome Sottogruppo Catalogo standard",
+    )
 
-            def _get_price():
-                price = row[priceCol]
-                if price in (None, "n.d.", '',):
-                    return None
-                if isinstance(price, basestring):
-                    return float(price.replace(",", "."))
+    out = {}
+    with open(fp) as source:
+        for row in csv.DictReader(source):
+            if not row[puk] in out:
+                out[row[puk]] = []
+            rr = dict([(k, row[k]) for k in cats if row[k]])
+            if all(rr.values()) and not rr in out[row[puk]]:
+                out[row[puk]].append(rr)
+    return out
+
+def rsync():
+
+    dest_nfo = _get_dest_parts2()
+
+    if dest_nfo.get("protocol") == "ssh":
+        # Copy to remote destination using SSH/SFTP protocol with Paramiko
+        current.logger.debug("File transfer via SFTP is starting!")
+        client = paramiko.SSHClient()
+        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        conn = client.connect(dest_nfo["url"], 22,
+            username = dest_nfo["user"],
+            password = dest_nfo["passwd"],
+            timeout = 15*60
+        )
+        start = datetime.datetime.now()
+        sftp = client.open_sftp()
+
+        for dirpath, __dirnames, filenames in os.walk(dest_nfo["tmp_path"]):
+            if dirpath==dest_nfo["tmp_path"]:
+                continue
+            for filename in filenames:
+                source_path = os.path.join("/", os.path.relpath(dirpath, dest_nfo["tmp_path"]))
+                source_file_path = os.path.join(dirpath, filename)
+                dest_file_path = os.path.join(source_path, filename)
+                err = False
+                try:
+                    sftp.put(source_file_path, dest_file_path)
+                except Exception as error:
+                    err = True
                 else:
-                    return price
+                    if filename.endswith(".zip"):
 
-            raw_base_price = _get_price()
+                        commands = [
+                            'unzip -o -d %(source_path)s %(dest_file_path)s' % locals(),
+                            # Rimozione degli archivi originari (solo se unzip ha successo [1])
+                            'rm -f %(dest_file_path)s' % locals(),
+                            # I due passaggi che seguono sono utili SOLO per l'archivio delle immagini delle ditte
+                            'mv %(source_path)s/images/* %(source_path)s/' % locals(),
+                            'rmdir %(source_path)s/images' % locals(),
+                        ]
 
-            if raw_base_price is None:
-                return None
-            else:
-                full_price = (1+refill/100.)*raw_base_price
-                rounded_price = "%.2f" % full_price
-                return rounded_price.replace(".", ",")
-
-        new_col_head = "Prezzo Newirbel"
-        allvalues = cls._read_not_empty_rows_from_sheet(sheet)
-        fieldnames=allvalues.next()
-        if not priceCol is None:
-            fieldnames += [new_col_head]
-
-        with open(newcsvpath, "w") as ADVcsv:
-            csvwriter = csv.DictWriter(ADVcsv, fieldnames=fieldnames)
-            csvwriter.writeheader()
-            for values in allvalues:
-                csv_row_content = dict(zip(fieldnames, values))
-                if not priceCol is None:
-                    full_price = _get_full_price(csv_row_content)
-                    if not full_price is None:
-                        csv_row_content[new_col_head] = full_price
-                csvwriter.writerow(csv_row_content)
-
-    @classmethod
-    def extract_tabs(cls, archname, filepath, removeOriginal=True,
-        priceCol = "Prezzo Base Rivenditore",
-        # Indicates the tab with the price column
-        priceTab = 0,
-        catCol = "Categoria",
-        # Extracts only the whole content of tab containing the price column (see priceTab)
-        priceOnly = True
-    ):
-        """ Split tabs of a single xls file into multiple csv """
-
-        newcsvpaths = []
-
-        with xlrd.open_workbook(filepath) as xlsSRC:
-            for sindex in xrange(xlsSRC.nsheets):
-
-                if not priceOnly or sindex == priceTab:
-
-                    sheet = xlsSRC.sheet_by_index(sindex)
-                    newcsvpath = cls._get_new_path(archname, filepath, sindex)
-                    if not newcsvpath is None:
-                        if sindex == priceTab:
-                            cls._export_sheet_to_csv(sheet, newcsvpath, priceCol=priceCol, catCol=catCol)
-                        else:
-                            cls._export_sheet_to_csv(sheet, newcsvpath, priceCol=None)
-                        newcsvpaths.append(newcsvpath)
-
-        if removeOriginal:
-            os.remove(filepath)
-            tmppath, _ = os.path.split(filepath)
-            try:
-                os.removedirs(tmppath)
-            except OSError:
-                pass
-            current.logger.info("File %s removed!" % filepath)
-        else:
-            current.logger.debug("File %s NOT removed for debug!" % filepath)
-
-        return newcsvpaths
-
-    @staticmethod
-    def rsync():
-
-        dest_nfo = _get_dest_parts2()
-
-        if dest_nfo.get("protocol") == "ssh":
-            # Copy to remote destination using SSH/SFTP protocol with Paramiko
-
-            current.logger.debug("File transfer via SFTP is starting!")
-            client = paramiko.SSHClient()
-            client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-            conn = client.connect(dest_nfo["url"], 22,
-                username = dest_nfo["user"],
-                password = dest_nfo["passwd"],
-                timeout = 15*60
-            )
-            start = datetime.datetime.now()
-            sftp = client.open_sftp()
-
-            for dirpath, __dirnames, filenames in os.walk(dest_nfo["tmp_path"]):
-                if dirpath==dest_nfo["tmp_path"]:
-                    continue
-                for filename in filenames:
-                    source_path = os.path.join("/", os.path.relpath(dirpath, dest_nfo["tmp_path"]))
-                    source_file_path = os.path.join(dirpath, filename)
-                    dest_file_path = os.path.join(source_path, filename)
-                    err = False
-                    try:
-                        sftp.put(source_file_path, dest_file_path)
-                    except Exception as error:
-                        err = True
+                        exit_status = 0
+                        for n,command in enumerate(commands):
+                            # [1] Non eseguo il comando se il passo precedente non è uscito con successo
+                            if command and exit_status==0 or n!=1:
+                                current.logger.info("Executing: %(command)s" % locals())
+                                chan = client.get_transport().open_session()
+                                chan.exec_command(command)
+                                # wait for result
+                                exit_status = chan.recv_exit_status()
+                                if exit_status==0:
+                                    current.logger.info("Command exited with success!")
+                                else:
+                                    current.logger.error("Running command raised exception:")
+                                    current.logger.info(chan.makefile_stderr().read())
+                                chan.close()
+                finally:
+                    if err:
+                        if conn:
+                            conn.close()
+                        raise error
                     else:
-                        if filename.endswith(".zip"):
+                        current.logger.info("File transfer via SFTP started: %s" % prettydate(start))
+                        current.logger.info("Transfered %s to %s" % (source_file_path, dest_file_path))
+        if conn:
+            conn.close()
 
-                            commands = [
-                                'unzip -o -d %(source_path)s %(dest_file_path)s' % locals(),
-                                # Rimozione degli archivi originari (solo se unzip ha successo [1])
-                                'rm -f %(dest_file_path)s' % locals(),
-                                # I due passaggi che seguono sono utili SOLO per l'archivio delle immagini delle ditte
-                                'mv %(source_path)s/images/* %(source_path)s/' % locals(),
-                                'rmdir %(source_path)s/images' % locals(),
-                            ]
+    elif dest_nfo.get("protocol") is None:
+        # Copy to local destination
+        start = datetime.datetime.now()
+        for __dirpath, __dirnames, filenames in os.walk(dest_nfo["tmp_path"]):
+            for filename in filenames:
+                source_file_path = os.path.join(dirpath, filename)
+                dest_path = os.path.join("/", os.path.relpath(dirpath, dest_nfo["tmp_path"]))
+                dest_file_path = os.path.join(dest_path, filename)
+                shutil.move(source_file_path, dest_file_path)
+        current.logger.debug("Local file transfer started: %s" % prettydate(start))
+    else:
+        raise NotImplementedError
 
-                            exit_status = 0
-                            for n,command in enumerate(commands):
-                                # [1] Non eseguo il comando se il passo precedente non è uscito con successo
-                                if command and exit_status==0 or n!=1:
-                                    current.logger.info("Executing: %(command)s" % locals())
-                                    chan = client.get_transport().open_session()
-                                    chan.exec_command(command)
-                                    # wait for result
-                                    exit_status = chan.recv_exit_status()
-                                    if exit_status==0:
-                                        current.logger.info("Command exited with success!")
-                                    else:
-                                        current.logger.error("Running command raised exception:")
-                                        current.logger.info(chan.makefile_stderr().read())
-                                    chan.close()
-                    finally:
-                        if err:
-                            if conn:
-                                conn.close()
-                            raise error
-                        else:
-                            current.logger.info("File transfer via SFTP started: %s" % prettydate(start))
-                            current.logger.info("Transfered %s to %s" % (source_file_path, dest_file_path))
-            if conn:
-                conn.close()
+    if not current.development:
+        shutil.rmtree(dest_nfo["tmp_path"])
 
-        elif dest_nfo.get("protocol") is None:
-            # Copy to local destination
-            start = datetime.datetime.now()
-            for __dirpath, __dirnames, filenames in os.walk(dest_nfo["tmp_path"]):
-                for filename in filenames:
-                    source_file_path = os.path.join(dirpath, filename)
-                    dest_path = os.path.join("/", os.path.relpath(dirpath, dest_nfo["tmp_path"]))
-                    dest_file_path = os.path.join(dest_path, filename)
-                    shutil.move(source_file_path, dest_file_path)
-            current.logger.debug("Local file transfer started: %s" % prettydate(start))
-        else:
-            raise NotImplementedError
 
-        if not current.development:
-            shutil.rmtree(dest_nfo["tmp_path"])
-
-    @classmethod
-    def run(cls, tab, row, removeTmp=False):
-        # Prezzi
-        if row.archname == "arch_pri":
-            fp = cls.unzip(tab, row)
-            return cls.extract_tabs(row.archname, fp, removeOriginal=removeTmp)
-        # Catalogo
-        elif row.archname == "arch_cat":
-            fp = cls.copy2(tab, row, rename=False)
-            return cls.extract_tabs(row.archname, fp, removeOriginal=removeTmp, priceCol=None)
-        # Altro
-        else:
-            return cls.copy2(tab, row, rename=True)
+# class Elaborate(object):
+#     """ DEPRECATED Basic file operations """
+# 
+#     @staticmethod
+#     def _get_new_path(an, fp, i=None):
+#         """
+#         an @string  : Archive name
+#         fp @string  : File path
+#         i  @integer : Index
+#         """
+#         pt, fn = os.path.split(fp)
+#         _raw_uuids = current.appconf[an].get("csvuuids")
+#         uuids = _raw_uuids and _raw_uuids.split(',')
+#         dest_nfo = _get_dest_parts2(an)
+# 
+#         rpl = ".csv" if i is None else "_tab%s.csv" % i
+#         nfn = (dest_nfo.get("name") or fn).replace(".xls", rpl)
+# 
+#         if uuids:
+#             try:
+#                 mypath = os.path.join(pt, uuids[i or 0])
+#             except IndexError:
+#                 return None
+#             else:
+#                 if not os.path.exists(mypath):
+#                     os.makedirs(mypath)
+#                 return os.path.join(mypath, nfn)
+#         else:
+#             return os.path.join(pt, nfn)
+# 
+#     @staticmethod
+#     def _read_not_empty_rows_from_sheet(sheet):
+# 
+#         def _uenc(cell):
+#             """ Encode unicode value to system encoding """
+#             value = cell.value
+#             if isinstance(value, basestring):
+#                 return value.encode("utf8")
+#             else:
+#                 return value
+# 
+#         for ridx in xrange(sheet.nrows):
+#             values = [_uenc(c) for c in sheet.row(ridx)]
+#             if any(values):
+#                 yield values
+#             else:
+#                 continue
+# 
+#     @classmethod
+#     def unzip(cls, tab, row):
+#         """ Unzip single zipped file in temporary local path """
+#         dest_nfo = _get_dest_parts2(row.archname)
+#         dest_path = dest_nfo.get("path")[1:] if dest_nfo.get("path").startswith("/") else dest_nfo.get("path")
+#         tmp_path = dest_nfo.get("tmp_path")
+#         if not tmp_path is None:
+#             (__filename, stream) = tab.archive.retrieve(row.archive)
+#             with zipfile.ZipFile(stream, "r") as adv:
+#                 advfilenames = adv.namelist()
+#                 # Da specifica l'archivio contiene un SOLO file
+#                 assert len(advfilenames)==1, "Unsupported!"
+#                 advfilename, ext = os.path.splitext(advfilenames[0])
+#                 advfilename = "{fn}_{ts}.{ext}".format(
+#                     fn = advfilename,
+#                     ts = row.last_update.strftime("%Y%m%d-%H%M%S"),
+#                     ext = ext
+#                 )
+# 
+#                 mypath = os.path.join(tmp_path, dest_path)
+#                 if not os.path.exists(mypath):
+#                     os.makedirs(mypath)
+# 
+#                 adv.extract(advfilename, mypath)
+#             ext_path = os.path.join(mypath, advfilename)
+#             return ext_path
+# 
+#     @classmethod
+#     def copy2(cls, tab, row, rename=True):
+#         """ Copy result file in temporary local path """
+#         dest_nfo = _get_dest_parts2(row.archname)
+#         dest_path = dest_nfo.get("path")[1:] if dest_nfo.get("path").startswith("/") else dest_nfo.get("path")
+#         tmp_path = dest_nfo.get("tmp_path")
+#         if not dest_nfo.get("path") is None:
+#             (filename, stream) = tab.archive.retrieve(row.archive)
+#             if rename:
+#                 dest_name = dest_nfo.get("name") or filename
+#             else:
+#                 dest_name = filename
+#             dest_path = os.path.join(tmp_path, dest_path)
+#             if not os.path.exists(dest_path):
+#                 os.makedirs(dest_path)
+#             dest_file_path = os.path.join(dest_path, dest_name)
+#             shutil.copyfileobj(stream, open(dest_file_path, 'wb'))
+# 
+#             current.logger.debug("File %s successfully copied to: %s" % (dest_name, dest_path,))
+#             return dest_file_path
+# 
+#     @staticmethod
+#     def _get_refills():
+#         """ Returns a dictionary with categories as keys and refills as values """
+#         cpath = os.path.join(current.appconf.conf_price.path, "%(filename)s.%(extension)s" % current.appconf.conf_price)
+#         def _iter():
+#             with open(cpath, 'rb') as csvfile:
+#                 spamreader = csv.reader(csvfile, delimiter=',')
+#                 for row in spamreader:
+#                     _row = List(*row)
+#                     yield _row(0), _row(1)
+# 
+#         if os.path.isfile(cpath):
+#             refills = dict([(k,v) for k,v in _iter()])
+#         else:
+#             refills = {}
+#         return refills
+# 
+#     @classmethod
+#     def _export_sheet_to_csv(cls, sheet, newcsvpath, priceCol=None, catCol="Categoria", osheet=None, pukcol=0):
+#         """
+#         sheet      @ADVSheetObject;
+#         newcsvpath @string : Path where to save the sheet in a single csv file; 
+#         priceCol   @string : Name of the column to which apply th refill;
+#         catCol     @string : Name of the column of categories used to get the right refill.
+#         WARNING: Only if priceCol is given it will try to apply refill.
+#         """
+# 
+#         if not priceCol is None:
+#             default_refill = current.appconf.conf_price.default_refill
+#             refills = cls._get_refills()
+#             _get_refill = lambda cat: float(refills.get(cat, 0)) or default_refill
+# 
+#         def _get_full_price(row):
+#             refill = _get_refill(row[catCol])
+# 
+#             def _get_price():
+#                 price = row[priceCol]
+#                 if price in (None, "n.d.", '',):
+#                     return None
+#                 if isinstance(price, basestring):
+#                     return float(price.replace(",", "."))
+#                 else:
+#                     return price
+# 
+#             raw_base_price = _get_price()
+# 
+#             if raw_base_price is None:
+#                 return None
+#             else:
+#                 full_price = (1+refill/100.)*raw_base_price
+#                 rounded_price = "%.2f" % full_price
+#                 return rounded_price.replace(".", ",")
+# 
+#         new_col_head = "Prezzo Newirbel"
+#         allvalues = cls._read_not_empty_rows_from_sheet(sheet)
+#         fieldnames=allvalues.next()
+#         if not priceCol is None:
+#             fieldnames += [new_col_head]
+# 
+#         with open(newcsvpath, "w") as ADVcsv:
+#             csvwriter = csv.DictWriter(ADVcsv, fieldnames=fieldnames)
+#             csvwriter.writeheader()
+#             for values in allvalues:
+#                 csv_row_content = dict(zip(fieldnames, values))
+#                 if not priceCol is None:
+#                     full_price = _get_full_price(csv_row_content)
+#                     if not full_price is None:
+#                         csv_row_content[new_col_head] = full_price
+#                 csvwriter.writerow(csv_row_content)
+# 
+#     @classmethod
+#     def extract_tabs(cls, archname, filepath, removeOriginal=True,
+#         priceCol = "Prezzo Base Rivenditore",
+#         # Indicates the tab with the price column
+#         priceTab = 0,
+#         catCol = "Categoria",
+#         # Extracts only the whole content of tab containing the price column (see priceTab)
+#         priceOnly = True,
+#         # filepath della eventuale vecchia versione del file
+# #         ofp = None
+#     ):
+#         """ Split tabs of a single xls file into multiple csv """
+# 
+#         newcsvpaths = []
+# 
+#         with xlrd.open_workbook(filepath) as xlsSRC:
+#             for sindex in xrange(xlsSRC.nsheets):
+#  
+#                 if not priceOnly or sindex == priceTab:
+#  
+#                     sheet = xlsSRC.sheet_by_index(sindex)
+#                     newcsvpath = cls._get_new_path(archname, filepath, sindex)
+#                     if not newcsvpath is None:
+#                         if sindex == priceTab:
+#                             cls._export_sheet_to_csv(sheet, newcsvpath, priceCol=priceCol, catCol=catCol)
+#                         else:
+#                             cls._export_sheet_to_csv(sheet, newcsvpath, priceCol=None)
+#                         newcsvpaths.append(newcsvpath)
+# 
+#         if removeOriginal:
+#             os.remove(filepath)
+#             tmppath, _ = os.path.split(filepath)
+#             try:
+#                 os.removedirs(tmppath)
+#             except OSError:
+#                 pass
+#             current.logger.info("File %s removed!" % filepath)
+#         else:
+#             current.logger.debug("File %s NOT removed for debug!" % filepath)
+# 
+#         return newcsvpaths
+# 
+#     @staticmethod
+#     def _csvdiff(ofp, nfp):
+#         """ """
+#         priUIDName = "Codice Articolo"
+#         destPath, _ = os.path.split(ofp)
+#         
+#         with open(ofp) as opri, open(nfp) as npri:
+#             oprir = csv.DictReader(opri)
+#             nprir = csv.DictReader(npri)
+# 
+#             orows = {row[priUIDName]: row for row in oprir}
+#             nrows = {row[priUIDName]: row for row in nprir}
+#             diffs = {k: v for k,v in nrows.iteritems() if v!=orows.get(k)}
+# 
+#             
+# 
+#     @classmethod
+#     def run(cls, tab, row, removeTmp=False, orow=None):
+#         # Prezzi
+#         if row.archname == "arch_pri":
+#             fp = cls.unzip(tab, row)
+#             apaths = cls.extract_tabs(row.archname, fp, removeOriginal=removeTmp)
+#             ofp = orow and cls.unzip(tab, orow)
+#             if not ofp is None:
+#                 opaths =  cls.extract_tabs(row.archname, ofp, removeOriginal=removeTmp)
+#                 npaths = cls._csvdiff(apaths[0], opaths[0])
+#                 return npaths
+#             else:
+#                 return apaths
+#             
+#         # Catalogo
+#         elif row.archname == "arch_cat":
+#             fp = cls.copy2(tab, row, rename=False)
+#             return cls.extract_tabs(row.archname, fp, removeOriginal=removeTmp, priceCol=None)
+#         # Altro
+#         else:
+#             return cls.copy2(tab, row, rename=True)
 
 class DBSyncer(object):
     """ Retrieve files from remote FTP repository and store into DB """
@@ -358,24 +540,6 @@ class DBSyncer(object):
 
     def _truncate(self):
         self.table.truncate('RESTART IDENTITY CASCADE')
-
-#     @staticmethod
-#     def _get_dest_parts():
-#         """ DEPRECATED """
-# 
-#         out = {}
-# 
-#         if "dest" in current.appconf:
-#             dest = current.appconf["dest"]["dest"]
-#             out.update({k: v for k,v in current.appconf["dest"].iteritems() if k!="dest"})
-#         else:
-#             dest = None
-# 
-#         if not dest is None:
-#             out.update(current.appconf[dest])
-#             out["protocol"] = dest.split("_")[0]
-# 
-#         return out or None
 
     def retrieve(self, filename):
         """
@@ -403,7 +567,7 @@ class DBSyncer(object):
         stream.close()
         return newfilename, checksum
 
-    def fetch(self, archname, source_path, period, name_starts=None, extension=None, **kw):
+    def fetch(self, archname, source_path, period, name_starts=None, extension=None, force=False, **kw):
         success = False
 
         def _get_last_path(*path):
@@ -415,13 +579,13 @@ class DBSyncer(object):
             else:
                 return os.path.join(*path)
 
-        now = datetime.datetime.now()
+#         now = datetime.datetime.now()
 
         rpath = source_path
         source_path = _get_last_path(*os.path.split(rpath))
         files = self.ftp.nlst(source_path)
-        nfiles = len(files)
-        for n,filename in enumerate(files):
+#         nfiles = len(files)
+        for __n,filename in enumerate(files):
             filepath = os.path.join(source_path, filename)
 
             if (name_starts is None or filename.lower().startswith(name_starts.lower())) \
@@ -452,26 +616,22 @@ class DBSyncer(object):
                     )
                     row = self.table[id]
                     self.db.commit()
-#                     Elaborate.run(self.table, row, removeTmp=(not current.development))
                 else:
                     row = self.db(self.db.archive.filename==filename).select(limitby=(0,1)).first()
-                    if (now-row.last_update).total_seconds()>=period:
-                        if row.last_update < last_fs_update:
-                            current.logger.info("Downloading updated file.")
-                            newfilename, filehash = self.retrieve(filepath)
-                            success = True
-                            row.update_record(
-                                archive = newfilename,
-                                last_update = last_fs_update,
-                                checksum = filehash,
-    #                             is_active = True
-                            )
-                            self.db.commit()
-#                             Elaborate.run(self.table, row, removeTmp=(not current.development))
-                        else:
-                            current.logger.info("It's time to update file but no new version found")
+                    if row.last_update < last_fs_update:
+                        current.logger.info("Downloading updated file.")
+                        newfilename, filehash = self.retrieve(filepath)
+                        success = True
+                        row.update_record(
+                            archive = newfilename,
+                            last_update = last_fs_update,
+                            checksum = filehash,
+#                             is_active = True
+                        )
+                        self.db.commit()
                     else:
-                        current.logger.info("File still updated.")
+                        current.logger.info("It's time to update file but no new version found")
+
                 current.logger.info("=== Fetching file operation terminated (Started: %s) ===\n" % prettydate(start))
             else:
                 current.logger.debug("NO!: %s - %s, %s" % (filepath, name_starts, extension,))

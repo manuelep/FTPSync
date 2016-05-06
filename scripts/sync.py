@@ -4,9 +4,10 @@
 # 
 # mypool = Pool(1)
 # p.map(f, [1, 2, 3])
+
 from gluon.tools import fetch
 import json
-from archiver import Elaborate
+from archiver import rsync
 
 def main():
     tmp_content = os.listdir(appconf.dest.tmp_path)
@@ -14,28 +15,30 @@ def main():
         res = dbsync(force=current.development)
         logger.info("Fetched %(len)s archives:\n\t%(fetched_archives)s" % {k: json.dumps(v, indent=4) for k,v in res.iteritems()})
         logger.info("=== End of fetching source! ===")
-        mainarch = ("arch_cat", "arch_pri",)
 
+        mainarch = ("arch_cat", "arch_pri", "arch_avl",)
+   
         gorsync = False
         runproductupdate = False
 
-        # cat e pri necessitano di elaborazione congiunta
+        # Elaborazione congiunta degli archivi di catalogo, prezzi e disponibilità
+        # per preparazione file dei prodotti (completo ed eventualmente quello parziale)
         if any([i in res["fetched_archives"] for i in mainarch]):
-            prepare.products(removeOriginals=not current.development)
+            prepare.products(updated=res["fetched_archives"].keys(), clean=not current.development)
             gorsync = True
             runproductupdate = True
 
-        # elaborazioni singole
+        #elaborazioni singole (x archivi di immagini)
         otherarch =  [a for a in res["fetched_archives"] if not a in mainarch]
         if len(otherarch)>0:
             for row in db(db.archive.archname.belongs(otherarch)).select():
-                Elaborate.run(db.archive, row, removeTmp=not current.development)
+                prepare.getFromDB(row)                
                 current.logger.info("File from %s archive copied to tmp destination." % db.archive)
             gorsync = True
 
         if gorsync:
-            Elaborate.rsync()
-
+            rsync()
+ 
         if runproductupdate:
             url = "http://newirbel.com/wp-cron.php?import_key=QDTB6K92&import_id=19&action=trigger"
             data = {"import_key": "QDTB6K92", "import_id": 19, "action": "trigger"}

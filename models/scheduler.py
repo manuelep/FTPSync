@@ -23,6 +23,8 @@ def dbsync(waits=0, force=False):
 
     now = datetime.datetime.now()
     def checkrepo(archname):
+        if force:
+            return True
         fres = res.find(lambda r: r.archive.archname==archname, limitby=(0,1,)).first()
         if fres is None:
             # se nessun download presente
@@ -34,7 +36,7 @@ def dbsync(waits=0, force=False):
 
     # downloadable archives
     archives = dict([(k,v) for k,v in appconf.iteritems() \
-        if k.startswith('arch_') and v.ignore!=True and (force or checkrepo(k))
+        if k.startswith('arch_') and v.ignore!=True and checkrepo(k)
     ])
 
     fetched = {}
