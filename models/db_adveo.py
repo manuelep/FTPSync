@@ -39,7 +39,7 @@ class prepare(object):
         return filepath
 
     @staticmethod
-    def _splitxls(stream, filename, destpath="/tmp", destfilename=None, tabs=0):
+    def _splitxls(stream, filename, destpath="/tmp", destfilename=None, tabs=0, header_line=0):
         """ Split tabs of a single XLS file into multiple CSV files.
         Returns list of file paths.
         """
@@ -68,7 +68,7 @@ class prepare(object):
         for sindex, sheet in _loopOsheets():
             newcsvpath = os.path.join(destpath, _getNewFilename(sindex))
             with open(newcsvpath, "w") as destcsv:
-                mysreader = SheetReader(sheet)
+                mysreader = SheetReader(sheet, header_line=header_line)
                 csvwriter = csv.DictWriter(destcsv, fieldnames=mysreader.header)
                 csvwriter.writeheader()
                 for r in mysreader():
@@ -97,15 +97,12 @@ class prepare(object):
         dest_nfo = get_dest_parts(row.archname)
         filename, stream = tab.archive.retrieve(row.archive)
 
-#         optt = {"destpath": "tmp_path", "destfilename": "name"}
-#         optz = {k: dest_nfo[l] for k,l in optt.iteritems() if l in dest_nfo}
-
         destpath = destpath or get_dest_path(row.archname)
         destfilename = dest_nfo.get("name")
-        if row.archname=="arch_cat":
-            return cls._splitxls(stream, filename, destpath, destfilename, tabs=(0,1,))
-        elif row.archname == "arch_pri":
+        if row.archname in ("arch_cat", "arch_pri",):
             return cls._splitxls(stream, filename, destpath, destfilename)
+        elif row.archname == "arch_apt":
+            return cls._splitxls(stream, filename, destpath, destfilename, header_line=2)
         elif row.archname == "arch_avl":
             return {"tab0": cls._txt2csv(stream, destfilename or filename, destpath)}
         else:
@@ -123,7 +120,7 @@ class prepare(object):
         outpath = get_dest_path("arch_cat")
 
         # 1. Extract last updated data from db
-        repos = ("arch_cat", "arch_pri", "arch_avl",)
+        repos = ("arch_cat", "arch_avl", "arch_pri", "arch_apt",)
         assert db(db.archive.archname.belongs(repos)).count()==len(repos), "Error!"
         actuals = db(db.archive.archname.belongs(repos)).select().group_by_value(db.archive.archname)
         _actuals = db(db.archive.archname.belongs(repos))._select(db.archive.id)
@@ -140,50 +137,46 @@ class prepare(object):
         apaths = {an: cls.getFromDB(rows[0]) for an,rows in actuals.iteritems()}
         opaths = {an: cls.getFromDB(rows[0], "/tmp") for an,rows in olds.iteritems()}
 
-        duplicates = load_duplicates(apaths["arch_cat"]["tab1"])
-
-        # 
-        sortorder = [
-           "arch_cat",
-           "arch_avl",
-           "arch_pri"
-        ]
+#         duplicates = load_duplicates(apaths["arch_cat"]["tab1"])
 
         # UID code columns
         UID = {
            "arch_cat": "Codice",
            "arch_pri": "Codice Articolo",
-           "arch_avl": "Product SKU"
+           "arch_avl": "Product SKU",
+           "arch_apt": "Codice Articolo"
         }
 
-        priCol = "Prezzo Base Rivenditore"
-        catCol = "Categoria"
+#         priCol = "Prezzo Base Rivenditore"
+#         catCol = "Categoria"
         fields = {
-           "arch_cat": None, # That means ALL columns!
-           "arch_pri": ("Larghezza", "Profondità", "Altezza", "Peso", catCol, priCol,),
-           "arch_avl": ("Stock Quantity",)
+            "arch_cat": None, # That means ALL columns!
+            "arch_pri": ("Larghezza", "Profondità", "Altezza", "Peso",),
+            "arch_apt": ("Prezzo Iva Esclusa",),
+            "arch_avl": ("Stock Quantity",)
         }
 
         # Value adjustments
         adjustments = {
             # Weight adjustment (From gr to kg)
-            "Peso": lambda v: v and ("%.3f" % (float(v)/1000)).replace(".", ",")
+            "Peso": lambda v: v and ("%.3f" % (float(v)/1000)).replace(".", ","),
+            "Prezzo Iva Esclusa": lambda v: v and ("%.2f" % float(v)).replace(".", ",")
         }
 
         # New computed columns
-        refiller = Refiller()
-        computeds = {
-            "Prezzo Newirbel": lambda r: r[priCol] and ("%.2f" % refiller(r[catCol], float(r[priCol].replace(",", ".")))).replace(".", ","),
-            "_UID": lambda r: hashlib.sha224("-".join([r[k] for k in (
-                "Codice",
-                "Nome Categoria Catalogo",
-                "Nome Gruppo Catalogo Standard",
-                "Nome Sottogruppo Catalogo standard",
-            )]).lower()).hexdigest()
-        }
-        def _compute(row):
-            for k,l in computeds.iteritems():
-                yield k, l(row)
+#         refiller = Refiller()
+#         computeds = {
+#             "Prezzo Newirbel": lambda r: r[priCol] and ("%.2f" % refiller(r[catCol], float(r[priCol].replace(",", ".")))).replace(".", ","),
+#             "_UID": lambda r: hashlib.sha224("-".join([r[k] for k in (
+#                 "Codice",
+#                 "Nome Categoria Catalogo",
+#                 "Nome Gruppo Catalogo Standard",
+#                 "Nome Sottogruppo Catalogo standard",
+#             )]).lower()).hexdigest()
+#         }
+#         def _compute(row):
+#             for k,l in computeds.iteritems():
+#                 yield k, l(row)
 
         # Rows by uuid for each archive
         # alailable contents VS old contents
@@ -202,17 +195,18 @@ class prepare(object):
                 with open(nfo["tab0"]) as source:
                     ocnts[an] = {row[UID[an]]: row for row in csv.DictReader(source)}
 
-        fieldnames = tuple(sum([list(aflds[k]) for k in sortorder], []) + computeds.keys())
+        fieldnames = tuple(sum([list(aflds[k]) for k in repos], []))
 
-        def _loopOduplicates(row, dpls):
-            yield row
-            for dpl in dpls:
-                if any([v!=row[k] for k,v in dpl.iteritems()]):
-                    rr = dict(row, **dpl)
-                    rr = dict(rr, **{k: v for k,v in _compute(rr)})
-                    yield {k: v for k,v in rr.iteritems() if k in fieldnames}
+#         def _loopOduplicates(row, dpls):
+#             """ DEPRECATED """
+#             yield row
+#             for dpl in dpls:
+#                 if any([v!=row[k] for k,v in dpl.iteritems()]):
+#                     rr = dict(row, **dpl)
+#                     rr = dict(rr, **{k: v for k,v in _compute(rr)})
+#                     yield {k: v for k,v in rr.iteritems() if k in fieldnames}
 
-        _buildRow = lambda puk,k: acnts["arch_avl"][puk].get(k, acnts["arch_pri"][puk].get(k, acnts["arch_cat"][puk].get(k)))
+        _buildRow = lambda puk,k: acnts["arch_avl"][puk].get(k, acnts["arch_pri"][puk].get(k, acnts["arch_cat"][puk].get(k, acnts["arch_apt"][puk].get(k))))
 
         allfile = os.path.join(outpath, "all_product.csv")
         updfile = os.path.join(outpath, "updated_product.csv")
@@ -228,24 +222,29 @@ class prepare(object):
             for puk in sorted(set.intersection(*map(set, acnts.values()))):
 
                 arow = {k: _buildRow(puk, k) for k in fieldnames}
-                orow = dict(sum(map(dict.items, [ocnts.get(an, {}).get(puk, {}) for an in sortorder]), []))
+                orow = dict(sum(map(dict.items, [ocnts.get(an, {}).get(puk, {}) for an in repos]), []))
                 
-                for k,f in computeds.iteritems():
-                    arow[k] = f(arow)
-                    try:
-                        orow[k] = f(orow)
-                    except KeyError:
-                        pass
+#                 for k,f in computeds.iteritems():
+#                     arow[k] = f(arow)
+#                     try:
+#                         orow[k] = f(orow)
+#                     except KeyError:
+#                         pass
 
                 record_updated = any([v!=arow[k] for k,v in orow.iteritems() if k in fieldnames])
 
                 for k,f in adjustments.iteritems():
                     arow[k] = f(arow[k])
 
-                rows = [r for r in _loopOduplicates(arow, duplicates.get(arow[UID["arch_cat"]], [{}]))]
-                map(allw.writerow, rows)
-                if record_updated:
-                    map(updw.writerow, rows)
+                allw.writerow(arow)
+                if len(updated)>0 and record_updated:
+                    updw.writerow(arow)
+
+#                 DEPRECATED
+#                 rows = [r for r in _loopOduplicates(arow, duplicates.get(arow[UID["arch_cat"]], [{}]))]
+#                 map(allw.writerow, rows)
+#                 if record_updated:
+#                     map(updw.writerow, rows)
 
         if clean:
             for paths in [apaths, opaths]:
@@ -254,84 +253,3 @@ class prepare(object):
                         keep_fs_clean(filepath) 
 
         return [allfile, updfile]
-
-
-#     @staticmethod
-#     def productsOLD(removeOriginals=True):
-#         """ DEPRECATED
-#         Merge informations from the last catalog, prices and refill files available """
-# 
-#         # 1. Extract last updated data from db
-# 
-#         repos = ("arch_cat", "arch_pri", "arch_avl")
-#         res = db(db.archive.archname.belongs(repos)).select()
-#         opri = db(
-#             db.archive_archive.current_record==res.find(lambda r: r.archname=="arch_pri").first().id
-#         ).select(
-#             orderby = ~db.archive_archive.modified_on,
-#             limitby = (1,0,)
-#         ).first()
-# 
-#         assert len(res)==2, "ERROR!"
-#         grouped = res.group_by_value(db.archive.archname)
-# 
-#         # 2. Create working copy
-# 
-#         paths = {row.archname: Elaborate.run(db.archive, row, removeTmp=not current.development, orow=opri)[0] for row in res}
-# 
-#         def _mergeInfo():
-#             
-#             catUIDName = "Codice"
-#             priUIDName = "Codice Articolo"
-#             priceColName = "Prezzo Newirbel"
-#             outName = "Adveo_DB_WEB_Cat_MERGED.csv"
-#             
-#             mergingCols = ["Larghezza", "Profondità", "Altezza", "Peso", priceColName]
-#             mergingAdjustments = {
-#                 # Weight adjustment (From gr to kg)
-#                 "Peso": lambda v: ("%.3f" % (float(v)/1000)).replace(".", ",")
-#             }
-# 
-#             destPath, _ = os.path.split(paths["arch_cat"])
-#             outPath = os.path.join(destPath, outName)
-#             with open(paths["arch_cat"]) as cat, \
-#                 open(paths["arch_pri"]) as pri, \
-#                 open(outPath, "w") as res:
-# 
-#                 # Readers
-#                 catr = csv.DictReader(cat)
-#                 prir = csv.DictReader(pri)
-#             
-#                 # Rows by uuid
-#                 cats = {row[catUIDName]: row for row in catr}
-#                 pris = {row[priUIDName]: row for row in prir}
-#             
-#                 def commons():
-#                     for cod in cats:
-#                         if cod in pris:
-#                             yield cod
-# 
-#                 resw = csv.DictWriter(res, fieldnames=catr.fieldnames+mergingCols)
-# 
-#                 resw.writeheader()
-#                 for cod in commons():
-#                     row = dict(cats[cod], **{k: mergingAdjustments.get(k, lambda v: v)(pris[cod][k]) for k in mergingCols})
-#                     resw.writerow(row)
-# 
-#             if removeOriginals:
-#                 os.remove(paths["arch_cat"])
-#                 current.logger.info("File %s removed!" % paths["arch_cat"])
-#                 os.remove(paths["arch_pri"])
-#                 current.logger.info("File %s removed!" % paths["arch_pri"])
-#                 tmpfolder, _ = os.path.split(paths["arch_pri"])
-#                 try:
-#                     os.removedirs(tmpfolder)
-#                 except OSError:
-#                     pass
-#             else:
-#                 current.logger.debug("File %s NOT removed for debug!" % paths["arch_cat"])
-#                 current.logger.debug("File %s NOT removed for debug!" % paths["arch_pri"])
-# 
-#             return outPath
-# 
-#         return _mergeInfo()

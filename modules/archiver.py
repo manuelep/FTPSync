@@ -90,11 +90,12 @@ get_dest_path = _get_dest_path
 
 class SheetReader(object):
 
-    def __init__(self, sheet):
+    def __init__(self, sheet, header_line=0):
         self.sheet = sheet
-        self.header = self._read().next()
+        self.start = header_line+1
+        self.header = self._read_line(header_line)
 
-    def _read(self, start=0):
+    def _read(self, start=0, end=None):
 
         def _uenc(cell):
             """ Encode unicode value to system encoding """
@@ -104,15 +105,18 @@ class SheetReader(object):
             else:
                 return value
 
-        for ridx in xrange(start, self.sheet.nrows):
+        for ridx in xrange(start, end or self.sheet.nrows):
             values = [_uenc(c) for c in self.sheet.row(ridx)]
             if any(values):
                 yield values
             else:
                 continue
 
+    def _read_line(self, n):
+        return [i for i in self._read(n, n+1)][0]
+
     def __call__(self):
-        for r in self._read(1):
+        for r in self._read(self.start):
             yield dict(zip(self.header, r))
 
 class stock(object):
