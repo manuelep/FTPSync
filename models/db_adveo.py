@@ -24,7 +24,56 @@ db.define_table("archive",
 
 db.archive.modified_on.readable = True
 db.archive._enable_record_versioning()
-db.archive_archive.archive.autodelete = True
+db.archive.archive.autodelete = False
+db.archive_archive.archive.autodelete = False
+
+# def fifo_archive(n=5):
+#     for row in db(db.archive.id>0).select(db.archive.archname):
+#         subquery = db(db.archive_archive.archname==row.archname)._select(
+#             db.archive_archive.id,
+#             orderby = ~db.archive_archive.created_on,
+#             limitby = (0,n,)
+#         )
+#         if db(db.archive_archive.archname==row.archname).count()>=3*n:
+# 
+#             todelete = db(
+#                 (db.archive_archive.archname==row.archname) & \
+#                 ~db.archive_archive.id.belongs(subquery)
+#             ).select()
+# 
+#             for row in todelete:
+#                 filename, filepath = db.archive_archive.archive.retrieve(row.archive, nameonly=True)
+#                 if db(db.archive.archive==filename).count()==0:
+#                     os.remove(filepath)
+#                 row.delete_record()
+# 
+#     db.commit()
+
+class fifo_archive(object):
+    n = 2 # 15
+    e = 0 # 5
+    
+    @classmethod
+    def before_insert(cls, f):
+        query = db.archive_archive.current_record==f.get("current_record")
+        if db(query).count()>cls.n+cls.e:
+            sq = db(query)._select(db.archive_archive.id, orderby=~db.archive_archive.id, limitby=(0,cls.n))
+            db(db.archive_archive.id.belongs(qs)).delete()
+
+    @staticmethod
+    def before_delete(s):
+
+        res = db(
+            db.archive_archive.id.belongs(s._select(db.archive_archive.id)) & \
+            ~db.archive_archive.archive.belongs(db(db.archive.id>0)._select(db.archive.archive))
+        ).select()
+
+        for row in res:
+            filename, filepath = db.archive_archive.archive.retrieve(row.archive, nameonly=True)
+            os.remove(filepath)
+            
+db.archive_archive._before_insert.append(fifo_archive.before_insert)
+db.archive_archive._before_delete.append(fifo_archive.before_delete)
 
 class prepare(object):
 

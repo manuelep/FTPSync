@@ -16,7 +16,7 @@ def main():
         logger.info("Fetched %(len)s archives:\n\t%(fetched_archives)s" % {k: json.dumps(v, indent=4) for k,v in res.iteritems()})
         logger.info("=== End of fetching source! ===")
 
-        mainarch = ("arch_cat", "arch_pri", "arch_avl",)
+        mainarch = ("arch_cat", "arch_pri", "arch_avl", "arch_apt",)
    
         gorsync = False
         runproductupdate = False
@@ -39,10 +39,9 @@ def main():
         if gorsync:
             rsync()
  
-        if runproductupdate:
-            url = "http://newirbel.com/wp-cron.php?import_key=QDTB6K92&import_id=19&action=trigger"
-            data = {"import_key": "QDTB6K92", "import_id": 19, "action": "trigger"}
-            fetch(url, data)
+        if runproductupdate and not current.appconf.trigger_url.ignore:
+            html = fetch(current.appconf.trigger_url, current.appconf.trigger_data)
+            current.logger.info(html)
 
     else:
         logger.error("Tmp folder is not empty: %s" % str(tmp_content))
