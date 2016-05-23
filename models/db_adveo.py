@@ -72,8 +72,8 @@ class fifo_archive(object):
             filename, filepath = db.archive_archive.archive.retrieve(row.archive, nameonly=True)
             os.remove(filepath)
             
-db.archive_archive._before_insert.append(fifo_archive.before_insert)
-db.archive_archive._before_delete.append(fifo_archive.before_delete)
+#db.archive_archive._before_insert.append(fifo_archive.before_insert)
+#db.archive_archive._before_delete.append(fifo_archive.before_delete)
 
 class prepare(object):
 
