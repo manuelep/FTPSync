@@ -57,7 +57,7 @@ class fifo_archive(object):
     def before_insert(cls, f):
         query = db.archive_archive.current_record==f.get("current_record")
         if db(query).count()>cls.n+cls.e:
-            sq = db(query)._select(db.archive_archive.id, orderby=~db.archive_archive.id, limitby=(0,cls.n))
+            qs = db(query)._select(db.archive_archive.id, orderby=~db.archive_archive.id, limitby=(0,cls.n))
             db(db.archive_archive.id.belongs(qs)).delete()
 
     @staticmethod
