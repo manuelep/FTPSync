@@ -139,7 +139,7 @@ class prepare(object):
 
     @classmethod
     def getFromDB(cls, row, destpath=None):
-        """ """
+        """ Retrieve from DB and save in temporary path """
 
         tab = db.archive
 

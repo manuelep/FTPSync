@@ -199,7 +199,7 @@ def rsync():
 
     if dest_nfo.get("protocol") == "ssh":
         # Copy to remote destination using SSH/SFTP protocol with Paramiko
-        current.logger.debug("File transfer via SFTP is starting!")
+        current.logger.info("File transfer via SFTP is starting!")
         client = paramiko.SSHClient()
         client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
         conn = client.connect(dest_nfo["url"], 22,
@@ -604,7 +604,11 @@ class DBSyncer(object):
                     self.ftp.sendcmd("TYPE A")
                     current.logger.debug("File: %s (size: %s)" % (filename, sizeof_fmt(filesize),))
 
-                is_in_db = self.db(self.table.filename==filename).count()
+                # --
+                dbset = self.db(self.table.archname==archname)
+                is_in_db = dbset.count()
+
+#                 is_in_db = self.db(self.table.filename==filename).count()
                 last_fs_update = datetime.datetime.strptime(self.ftp.sendcmd('MDTM ' + filepath)[4:], "%Y%m%d%H%M%S")
 
                 if is_in_db==0:
@@ -621,11 +625,12 @@ class DBSyncer(object):
                     row = self.table[id]
                     self.db.commit()
                 else:
-                    row = self.db(self.db.archive.filename==filename).select(limitby=(0,1)).first()
+                    # --
+                    row = dbset.select(limitby=(0,1)).first()
+#                     row = self.db(self.db.archive.filename==filename).select(limitby=(0,1)).first()
                     if row.last_update < last_fs_update:
                         current.logger.info("Downloading updated file.")
                         newfilename, filehash = self.retrieve(filepath)
-                        success = True
                         row.update_record(
                             archive = newfilename,
                             last_update = last_fs_update,
@@ -633,6 +638,7 @@ class DBSyncer(object):
 #                             is_active = True
                         )
                         self.db.commit()
+                        success = True
                     else:
                         current.logger.info("It's time to update file but no new version found")
 
