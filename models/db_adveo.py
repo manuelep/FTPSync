@@ -148,10 +148,10 @@ class prepare(object):
 
         destpath = destpath or get_dest_path(row.archname)
         destfilename = dest_nfo.get("name")
-        if row.archname in ("arch_cat", "arch_pri",):
+        if row.archname in ("arch_cat", "arch_pri", "arch_apt",):
             return cls._splitxls(stream, filename, destpath, destfilename)
-        elif row.archname == "arch_apt":
-            return cls._splitxls(stream, filename, destpath, destfilename, header_line=2)
+#         elif row.archname == "arch_apt":
+#             return cls._splitxls(stream, filename, destpath, destfilename, header_line=2)
         elif row.archname == "arch_avl":
             return {"tab0": cls._txt2csv(stream, destfilename or filename, destpath)}
         else:
@@ -201,7 +201,7 @@ class prepare(object):
         fields = {
             "arch_cat": None, # That means ALL columns!
             "arch_pri": ("Larghezza", "Profondità", "Altezza", "Peso",),
-            "arch_apt": ("Prezzo Iva Esclusa",),
+            "arch_apt": ("Prezzo Netto", "Inizio Promozione", "Fine Promozione",),
             "arch_avl": ("Stock Quantity",)
         }
 
@@ -209,7 +209,7 @@ class prepare(object):
         adjustments = {
             # Weight adjustment (From gr to kg)
             "Peso": lambda v: v and ("%.3f" % (float(v)/1000)).replace(".", ","),
-            "Prezzo Iva Esclusa": lambda v: v and ("%.2f" % float(v)).replace(".", ",")
+            "Prezzo Netto": lambda v: v and ("%.2f" % float(v)).replace(".", ",")
         }
 
         # New computed columns

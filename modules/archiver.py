@@ -632,6 +632,7 @@ class DBSyncer(object):
                         current.logger.info("Downloading updated file.")
                         newfilename, filehash = self.retrieve(filepath)
                         row.update_record(
+                            filename = filename,
                             archive = newfilename,
                             last_update = last_fs_update,
                             checksum = filehash,
