@@ -40,7 +40,7 @@ def main():
             rsync()
  
         if runproductupdate and not current.appconf.trigger_url.ignore:
-            html = fetch(current.appconf.trigger_url, current.appconf.trigger_data)
+            html = fetch(current.appconf.trigger_url.url, current.appconf.trigger_data)
             current.logger.info(html)
 
     else:
