@@ -50,14 +50,14 @@ db.archive_archive.archive.autodelete = False
 #     db.commit()
 
 class fifo_archive(object):
-    n = 2 # 15
-    e = 0 # 5
+    n = 15
+    e = 5
     
     @classmethod
     def before_insert(cls, f):
         query = db.archive_archive.current_record==f.get("current_record")
         if db(query).count()>cls.n+cls.e:
-            qs = db(query)._select(db.archive_archive.id, orderby=~db.archive_archive.id, limitby=(0,cls.n))
+            qs = db(query)._select(db.archive_archive.id, orderby=db.archive_archive.id, limitby=(0,cls.e))
             db(db.archive_archive.id.belongs(qs)).delete()
 
     @staticmethod
@@ -70,10 +70,13 @@ class fifo_archive(object):
 
         for row in res:
             filename, filepath = db.archive_archive.archive.retrieve(row.archive, nameonly=True)
-            os.remove(filepath)
+            try:
+                os.remove(filepath)
+            except Exception as err:
+                logger.exception("Warning")
             
-#db.archive_archive._before_insert.append(fifo_archive.before_insert)
-#db.archive_archive._before_delete.append(fifo_archive.before_delete)
+db.archive_archive._before_insert.append(fifo_archive.before_insert)
+db.archive_archive._before_delete.append(fifo_archive.before_delete)
 
 class prepare(object):
 
