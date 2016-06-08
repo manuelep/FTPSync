@@ -55,25 +55,39 @@ class fifo_archive(object):
     
     @classmethod
     def before_insert(cls, f):
-        query = db.archive_archive.current_record==f.get("current_record")
-        if db(query).count()>cls.n+cls.e:
-            qs = db(query)._select(db.archive_archive.id, orderby=db.archive_archive.id, limitby=(0,cls.e))
-            db(db.archive_archive.id.belongs(qs)).delete()
+        def _main():
+            query = db.archive_archive.current_record==f.get("current_record")
+            if db(query).count()>cls.n+cls.e:
+                qs = db(query)._select(db.archive_archive.id, orderby=db.archive_archive.id, limitby=(0,cls.e))
+                db(db.archive_archive.id.belongs(qs)).delete()
+
+        try:
+            _main()
+        except Exception as err:
+            logger.exception("FIFO ERROR in before_insert callback")
+            
 
     @staticmethod
     def before_delete(s):
 
-        res = db(
-            db.archive_archive.id.belongs(s._select(db.archive_archive.id)) & \
-            ~db.archive_archive.archive.belongs(db(db.archive.id>0)._select(db.archive.archive))
-        ).select()
+        def _main():
+    
+            res = db(
+                db.archive_archive.id.belongs(s._select(db.archive_archive.id)) & \
+                ~db.archive_archive.archive.belongs(db(db.archive.id>0)._select(db.archive.archive))
+            ).select()
+    
+            for row in res:
+                filename, filepath = db.archive_archive.archive.retrieve(row.archive, nameonly=True)
+                try:
+                    os.remove(filepath)
+                except Exception as err:
+                    logger.exception("Warning: problem removing file.")
 
-        for row in res:
-            filename, filepath = db.archive_archive.archive.retrieve(row.archive, nameonly=True)
-            try:
-                os.remove(filepath)
-            except Exception as err:
-                logger.exception("Warning")
+        try:
+            _main()
+        except Exception as err:
+            logger.exception("FIFO ERROR in before_delete callback")
             
 db.archive_archive._before_insert.append(fifo_archive.before_insert)
 db.archive_archive._before_delete.append(fifo_archive.before_delete)
